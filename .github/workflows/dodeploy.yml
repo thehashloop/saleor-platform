@@ -51,27 +51,54 @@ jobs:
         # Verify environment variable
         echo "DROPLET_IP is set to: ${DROPLET_IP}"
         
-        # Stop any running containers
-        docker compose down
+        # Stop and remove any existing containers
+        docker compose down -v
         
         # Pull latest images
         docker compose pull
         
-        # Run migrations
+        # Create database and run migrations
         docker compose run --rm api python3 manage.py migrate
         
-        # Start services
+        # Populate database with sample data
+        docker compose run --rm api python3 manage.py populatedb --createsuperuser
+        
+        # Start services in detached mode
         docker compose up -d
         
-        # Verify services are running
+        # Wait for services to be healthy
+        echo "Waiting for services to start..."
+        sleep 30
+        
+        # Check container status
+        echo "Container status:"
         docker compose ps
+        
+        # Check logs for each service
+        echo "API Logs:"
         docker compose logs api --tail 50
+        
+        echo "Database Logs:"
+        docker compose logs db --tail 20
+        
+        echo "Redis Logs:"
+        docker compose logs redis --tail 20
+        
+        # Verify API is responding
+        echo "Testing API connection..."
+        curl -v http://localhost:8000/
         EOF
 
     - name: Verify Deployment
       env:
         DROPLET_IP: ${{ inputs.droplet_ip }}
       run: |
-        echo "Waiting for services to start..."
-        sleep 30
-        curl -I http://${DROPLET_IP}:8000/
+        echo "Waiting for services to fully initialize..."
+        sleep 60
+        
+        # Test multiple endpoints
+        for endpoint in "" "graphql/" "dashboard/"; do
+          echo "Testing http://${DROPLET_IP}:8000/${endpoint}"
+          curl -v http://${DROPLET_IP}:8000/${endpoint}
+          echo -e "\n---\n"
+        done
