@@ -33,6 +33,7 @@ jobs:
       run: |
         ssh -o StrictHostKeyChecking=no root@${DROPLET_IP} << 'EOF'
         cd ~/app
+        export DROPLET_IP=${DROPLET_IP}
         docker compose down
         docker compose build
         docker compose run --rm api python3 manage.py migrate
