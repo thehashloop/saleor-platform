@@ -31,13 +31,13 @@ jobs:
       env:
         DROPLET_IP: ${{ inputs.droplet_ip }}
       run: |
-        ssh -o StrictHostKeyChecking=no root@${DROPLET_IP} << 'EOF'
+        ssh -o StrictHostKeyChecking=no root@${DROPLET_IP} << EOF
         cd ~/app
-        export DROPLET_IP=${DROPLET_IP}
+        export DROPLET_IP="${DROPLET_IP}"
         
-        # Verify DROPLET_IP is set
+        # Verify DROPLET_IP environment variable...
         echo "Checking DROPLET_IP environment variable..."
-        echo "DROPLET_IP=${DROPLET_IP}"
+        echo "DROPLET_IP=\${DROPLET_IP}"
         
         # Test if it's accessible in docker compose
         docker compose config | grep ALLOWED_HOSTS
