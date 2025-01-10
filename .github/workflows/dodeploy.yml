@@ -48,8 +48,15 @@ jobs:
         # Create .env file with DROPLET_IP
         echo "DROPLET_IP=${DROPLET_IP}" > .env
         
-        # Verify environment variable
-        echo "DROPLET_IP is set to: ${DROPLET_IP}"
+        # Explicitly set the IP in backend.env and docker-compose.yml
+        sed -i "s/ALLOWED_HOSTS=.*/ALLOWED_HOSTS=localhost,api,${DROPLET_IP}/" backend.env
+        sed -i "s/- ALLOWED_HOSTS=.*/- ALLOWED_HOSTS=localhost,api,${DROPLET_IP}/" docker-compose.yml
+        
+        # Verify the changes
+        echo "backend.env ALLOWED_HOSTS:"
+        grep ALLOWED_HOSTS backend.env
+        echo "docker-compose.yml ALLOWED_HOSTS:"
+        grep ALLOWED_HOSTS docker-compose.yml
         
         # Stop and remove any existing containers
         docker compose down -v
@@ -70,23 +77,9 @@ jobs:
         echo "Waiting for services to start..."
         sleep 30
         
-        # Check container status
-        echo "Container status:"
+        # Check container status and logs
         docker compose ps
-        
-        # Check logs for each service
-        echo "API Logs:"
         docker compose logs api --tail 50
-        
-        echo "Database Logs:"
-        docker compose logs db --tail 20
-        
-        echo "Redis Logs:"
-        docker compose logs redis --tail 20
-        
-        # Verify API is responding
-        echo "Testing API connection..."
-        curl -v http://localhost:8000/
         EOF
 
     - name: Verify Deployment
