@@ -23,7 +23,7 @@ services:
     environment:
       - JAEGER_AGENT_HOST=jaeger
       - DASHBOARD_URL=http://localhost:9000/
-      - ALLOWED_HOSTS=localhost,api,${DROPLET_IP}
+      - ALLOWED_HOSTS=localhost,api
 
   dashboard:
     image: ghcr.io/saleor/saleor-dashboard:latest
