@@ -30,32 +30,34 @@ jobs:
         SSH_KEY_ID=$(doctl compute ssh-key list --format ID --no-header)
         echo "Found SSH key ID: ${SSH_KEY_ID}"
         
-        # Create droplet with verbose output
+        # Create droplet and get its ID
         echo "Creating droplet..."
-        doctl compute droplet create my-droplet \
+        DROPLET_ID=$(doctl compute droplet create my-droplet \
           --region blr1 \
           --image docker-20-04 \
           --size s-2vcpu-4gb \
           --ssh-keys ${SSH_KEY_ID} \
           --enable-monitoring \
-          --output json | tee droplet.json || {
-            echo "Error creating droplet. Exit code: $?"
-            cat droplet.json || true
+          --output json | jq -r '.[0].id')
+        
+        echo "Droplet created with ID: ${DROPLET_ID}"
+        
+        # Wait for network information to become available
+        echo "Waiting for network information..."
+        for i in {1..30}; do
+          echo "Attempt $i: Checking for IP address..."
+          DROPLET_IP=$(doctl compute droplet get $DROPLET_ID --output json | jq -r '.[0].networks.v4[] | select(.type == "public") | .ip_address')
+          if [ ! -z "$DROPLET_IP" ]; then
+            echo "IP address found: ${DROPLET_IP}"
+            echo "DROPLET_IP=${DROPLET_IP}" >> $GITHUB_ENV
+            break
+          fi
+          if [ $i -eq 30 ]; then
+            echo "Timeout waiting for IP address"
             exit 1
-          }
-        
-        # Extract and verify IP
-        echo "Extracting IP address..."
-        DROPLET_IP=$(jq -r '.[0].networks.v4[] | select(.type == "public") | .ip_address' droplet.json)
-        if [ -z "$DROPLET_IP" ]; then
-          echo "Failed to extract IP address from response"
-          echo "Response content:"
-          cat droplet.json
-          exit 1
-        fi
-        
-        echo "Successfully got IP: ${DROPLET_IP}"
-        echo "DROPLET_IP=${DROPLET_IP}" >> $GITHUB_ENV
+          fi
+          sleep 10
+        done
 
     - name: Wait for Droplet to Become Active
       run: |
