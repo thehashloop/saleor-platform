@@ -98,6 +98,23 @@ jobs:
         grep "ALLOWED_HOSTS" docker-compose.yml
         EOF
 
+    - name: Install Docker and Docker Compose
+      run: |
+        ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << 'EOF'
+        # Check if Docker is installed and running
+        if ! command -v docker &> /dev/null || ! systemctl is-active --quiet docker; then
+          apt-get update
+          apt-get install -y docker.io docker-compose
+          systemctl start docker
+          systemctl enable docker
+        else
+          echo "Docker is already installed and running"
+        fi
+        
+        # Add user to docker group regardless
+        usermod -aG docker $USER
+        EOF
+
     - name: Initialize Application
       run: |
         ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
@@ -118,23 +135,6 @@ jobs:
         
         # Check container status
         docker compose ps
-        EOF
-
-    - name: Install Docker and Docker Compose
-      run: |
-        ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << 'EOF'
-        # Check if Docker is installed and running
-        if ! command -v docker &> /dev/null || ! systemctl is-active --quiet docker; then
-          apt-get update
-          apt-get install -y docker.io docker-compose
-          systemctl start docker
-          systemctl enable docker
-        else
-          echo "Docker is already installed and running"
-        fi
-        
-        # Add user to docker group regardless
-        usermod -aG docker $USER
         EOF
 
     - name: Output Droplet IP
