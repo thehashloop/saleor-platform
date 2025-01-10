@@ -34,6 +34,11 @@ jobs:
         ssh -o StrictHostKeyChecking=no root@${DROPLET_IP} << 'EOF'
         ufw allow 8000/tcp
         ufw allow 9000/tcp
+        ufw allow 5432/tcp
+        ufw allow 6379/tcp
+        ufw allow 16686/tcp
+        ufw allow 1025/tcp
+        ufw allow 8025/tcp
         ufw allow ssh
         echo "y" | ufw enable
         EOF
@@ -81,6 +86,11 @@ jobs:
         # Check container status and logs
         docker compose ps
         docker compose logs api --tail 50
+        
+        # Disable IP filtering
+        sed -i 's/HTTP_IP_FILTER_ENABLED=True/HTTP_IP_FILTER_ENABLED=False/' common.env
+        
+        # Add additional ports to firewall configuration
         EOF
 
     - name: Verify Deployment
