@@ -46,16 +46,24 @@ jobs:
         echo "Waiting for network information..."
         for i in {1..30}; do
           echo "Attempt $i: Checking for IP address..."
-          DROPLET_IP=$(doctl compute droplet get $DROPLET_ID --output json | jq -r '.[0].networks.v4[] | select(.type == "public") | .ip_address')
+          DROPLET_DATA=$(doctl compute droplet get $DROPLET_ID --output json)
+          echo "Droplet data: $DROPLET_DATA"
+          
+          # Check if networks field exists and has v4 entries
+          DROPLET_IP=$(echo "$DROPLET_DATA" | jq -r '.[0].networks.v4 // [] | map(select(.type == "public")) | .[0].ip_address // empty')
+          
           if [ ! -z "$DROPLET_IP" ]; then
             echo "IP address found: ${DROPLET_IP}"
             echo "DROPLET_IP=${DROPLET_IP}" >> $GITHUB_ENV
             break
           fi
+          
           if [ $i -eq 30 ]; then
             echo "Timeout waiting for IP address"
             exit 1
           fi
+          
+          echo "Sleeping for 10 seconds before next attempt..."
           sleep 10
         done
 
