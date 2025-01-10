@@ -2,6 +2,11 @@ name: Deploy Application to DigitalOcean
 
 on:
   workflow_dispatch:
+    inputs:
+      droplet_ip:
+        description: 'IP address of the DigitalOcean droplet'
+        required: true
+        type: string
 
 jobs:
   deploy:
@@ -18,16 +23,18 @@ jobs:
 
     - name: Copy Files to Droplet
       env:
-        DROPLET_IP: ${{ secrets.DROPLET_IP }}
+        DROPLET_IP: ${{ inputs.droplet_ip }}
       run: |
         scp -o StrictHostKeyChecking=no -r . root@${DROPLET_IP}:~/app
 
     - name: Deploy Docker Compose
       env:
-        DROPLET_IP: ${{ secrets.DROPLET_IP }}
+        DROPLET_IP: ${{ inputs.droplet_ip }}
       run: |
         ssh -o StrictHostKeyChecking=no root@${DROPLET_IP} << 'EOF'
         cd ~/app
         docker-compose down
-        docker-compose up -d --build
+        docker-compose build
+        docker-compose run --rm api python3 manage.py migrate
+        docker-compose up -d
         EOF
