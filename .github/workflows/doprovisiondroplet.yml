@@ -71,6 +71,11 @@ jobs:
       run: |
         sleep 60 # Give the droplet time to initialize
 
+    - name: Set up SSH
+      uses: webfactory/ssh-agent@v0.5.4
+      with:
+        ssh-private-key: ${{ secrets.DO_SSH_PRIVATE_KEY }}
+
     - name: Install Docker and Docker Compose
       run: |
         ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa root@${{ env.DROPLET_IP }} << 'EOF'
