@@ -98,6 +98,28 @@ jobs:
         grep "ALLOWED_HOSTS" docker-compose.yml
         EOF
 
+    - name: Initialize Application
+      run: |
+        ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
+        cd ~/app
+        
+        # Build the application
+        docker compose build
+        
+        # Run migrations
+        docker compose run --rm api python3 manage.py migrate
+        
+        # Start services in detached mode
+        docker compose up -d
+        
+        # Wait for services to be healthy
+        echo "Waiting for services to start..."
+        sleep 30
+        
+        # Check container status
+        docker compose ps
+        EOF
+
     - name: Install Docker and Docker Compose
       run: |
         ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << 'EOF'
