@@ -1,22 +1,19 @@
 name: saleor-platform
 services:
   - name: api
-    dockerfile_path: Dockerfile  # Path to your API Dockerfile
-    source_dir: .
-    github:
-      branch: main
-      deploy_on_push: true
-      repo: thehashloop/saleor-platform
+    image:
+      registry_type: DOCKER_HUB  # This works for GHCR as well
+      repository: ghcr.io/saleor/saleor
+      tag: 3.20
     http_port: 8000
     instance_count: 1
     instance_size_slug: basic-xxs
 
   - name: worker
-    dockerfile_path: Dockerfile
-    source_dir: .
-    github:
-      branch: main
-      repo: thehashloop/saleor-platform
+    image:
+      registry_type: DOCKER_HUB
+      repository: ghcr.io/saleor/saleor
+      tag: 3.20
     command: celery -A saleor --app=saleor.celeryconf:app worker --loglevel=info -B
     instance_count: 1
     instance_size_slug: basic-xxs
