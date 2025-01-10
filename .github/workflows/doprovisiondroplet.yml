@@ -25,9 +25,10 @@ jobs:
       run: |
         echo "Starting droplet creation..."
         
-        # Verify SSH key is available
+        # Verify SSH key and get its ID
         echo "Checking SSH key..."
-        doctl compute ssh-key list
+        SSH_KEY_ID=$(doctl compute ssh-key list --format ID --no-header)
+        echo "Found SSH key ID: ${SSH_KEY_ID}"
         
         # Create droplet with verbose output
         echo "Creating droplet..."
@@ -35,7 +36,7 @@ jobs:
           --region blr1 \
           --image docker-20-04 \
           --size s-2vcpu-4gb \
-          --ssh-keys ${{ secrets.DO_SSH_PUBLIC_KEY }} \
+          --ssh-keys ${SSH_KEY_ID} \
           --enable-monitoring \
           --output json | tee droplet.json || {
             echo "Error creating droplet. Exit code: $?"
