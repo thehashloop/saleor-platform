@@ -27,23 +27,51 @@ jobs:
       run: |
         scp -o StrictHostKeyChecking=no -r . root@${DROPLET_IP}:~/app
 
+    - name: Configure Firewall
+      env:
+        DROPLET_IP: ${{ inputs.droplet_ip }}
+      run: |
+        ssh -o StrictHostKeyChecking=no root@${DROPLET_IP} << 'EOF'
+        ufw allow 8000/tcp
+        ufw allow 9000/tcp
+        ufw allow ssh
+        echo "y" | ufw enable
+        EOF
+
     - name: Deploy Docker Compose
       env:
         DROPLET_IP: ${{ inputs.droplet_ip }}
       run: |
         ssh -o StrictHostKeyChecking=no root@${DROPLET_IP} << EOF
         cd ~/app
-        export DROPLET_IP="${DROPLET_IP}"
         
-        # Verify DROPLET_IP environment variable...
-        echo "Checking DROPLET_IP environment variable..."
-        echo "DROPLET_IP=\${DROPLET_IP}"
+        # Create .env file with DROPLET_IP
+        echo "DROPLET_IP=${DROPLET_IP}" > .env
         
-        # Test if it's accessible in docker compose
-        docker compose config | grep ALLOWED_HOSTS
+        # Verify environment variable
+        echo "DROPLET_IP is set to: ${DROPLET_IP}"
         
+        # Stop any running containers
         docker compose down
-        docker compose build
+        
+        # Pull latest images
+        docker compose pull
+        
+        # Run migrations
         docker compose run --rm api python3 manage.py migrate
+        
+        # Start services
         docker compose up -d
+        
+        # Verify services are running
+        docker compose ps
+        docker compose logs api --tail 50
         EOF
+
+    - name: Verify Deployment
+      env:
+        DROPLET_IP: ${{ inputs.droplet_ip }}
+      run: |
+        echo "Waiting for services to start..."
+        sleep 30
+        curl -I http://${DROPLET_IP}:8000/
