@@ -25,13 +25,16 @@ jobs:
       env:
         DROPLET_IP: ${{ inputs.droplet_ip }}
       run: |
-        scp -o StrictHostKeyChecking=no -r . root@${DROPLET_IP}:~/app
+        # Remove any http:// prefix if present
+        CLEAN_IP=$(echo ${DROPLET_IP} | sed 's|http://||')
+        scp -o StrictHostKeyChecking=no -r . root@${CLEAN_IP}:~/app
 
     - name: Configure Firewall
       env:
         DROPLET_IP: ${{ inputs.droplet_ip }}
       run: |
-        ssh -o StrictHostKeyChecking=no root@${DROPLET_IP} << 'EOF'
+        CLEAN_IP=$(echo ${DROPLET_IP} | sed 's|http://||')
+        ssh -o StrictHostKeyChecking=no root@${CLEAN_IP} << 'EOF'
         ufw allow 8000/tcp
         ufw allow 9000/tcp
         ufw allow 5432/tcp
@@ -47,7 +50,8 @@ jobs:
       env:
         DROPLET_IP: ${{ inputs.droplet_ip }}
       run: |
-        ssh -o StrictHostKeyChecking=no root@${DROPLET_IP} << EOF
+        CLEAN_IP=$(echo ${DROPLET_IP} | sed 's|http://||')
+        ssh -o StrictHostKeyChecking=no root@${CLEAN_IP} << EOF
         cd ~/app
         
         # Create .env file with DROPLET_IP
