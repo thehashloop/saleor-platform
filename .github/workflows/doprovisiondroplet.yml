@@ -23,14 +23,37 @@ jobs:
       env:
         DIGITALOCEAN_ACCESS_TOKEN: ${{ secrets.DO_TOKEN }}
       run: |
+        echo "Starting droplet creation..."
+        
+        # Verify SSH key is available
+        echo "Checking SSH key..."
+        doctl compute ssh-key list
+        
+        # Create droplet with verbose output
+        echo "Creating droplet..."
         doctl compute droplet create my-droplet \
           --region blr1 \
           --image docker-20-04 \
           --size s-2vcpu-4gb \
           --ssh-keys ${{ secrets.DO_SSH_PUBLIC_KEY }} \
           --enable-monitoring \
-          --output json > droplet.json
+          --output json | tee droplet.json || {
+            echo "Error creating droplet. Exit code: $?"
+            cat droplet.json || true
+            exit 1
+          }
+        
+        # Extract and verify IP
+        echo "Extracting IP address..."
         DROPLET_IP=$(jq -r '.[0].networks.v4[] | select(.type == "public") | .ip_address' droplet.json)
+        if [ -z "$DROPLET_IP" ]; then
+          echo "Failed to extract IP address from response"
+          echo "Response content:"
+          cat droplet.json
+          exit 1
+        fi
+        
+        echo "Successfully got IP: ${DROPLET_IP}"
         echo "DROPLET_IP=${DROPLET_IP}" >> $GITHUB_ENV
 
     - name: Wait for Droplet to Become Active
