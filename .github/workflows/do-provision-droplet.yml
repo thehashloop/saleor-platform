@@ -107,6 +107,10 @@ jobs:
         sed -i "s#NEXT_PUBLIC_SALEOR_API_URL=http://localhost:8000/#NEXT_PUBLIC_SALEOR_API_URL=http://${{ env.DROPLET_IP }}:8000/#" docker-compose.yml
         sed -i "s#NEXT_PUBLIC_STOREFRONT_URL=http://localhost:3000#NEXT_PUBLIC_STOREFRONT_URL=http://${{ env.DROPLET_IP }}:3000#" docker-compose.yml
         
+        # Update backend.env with correct IP address
+        sed -i "s#PUBLIC_URL=http://localhost:8000#PUBLIC_URL=http://${{ env.DROPLET_IP }}:8000#" backend.env
+        sed -i "s#MEDIA_URL=http://localhost:8000/media/#MEDIA_URL=http://${{ env.DROPLET_IP }}:8000/media/#" backend.env
+        
         # Verify the changes
         echo "Checking updated configuration..."
         grep "DASHBOARD_URL" docker-compose.yml
@@ -114,6 +118,8 @@ jobs:
         grep "API_URL" docker-compose.yml
         grep "NEXT_PUBLIC_SALEOR_API_URL" docker-compose.yml
         grep "NEXT_PUBLIC_STOREFRONT_URL" docker-compose.yml
+        grep "PUBLIC_URL" backend.env
+        grep "MEDIA_URL" backend.env
         EOF
 
     - name: Install Docker and Docker Compose
