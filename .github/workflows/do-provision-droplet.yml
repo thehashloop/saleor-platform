@@ -25,6 +25,10 @@ on:
         description: 'Reserved IP address to assign to the droplet'
         required: true
         type: string
+      domain:
+        description: 'Domain name to use (e.g. test.ayurvahi.com)'
+        required: true
+        type: string
 
 jobs:
   provision:
@@ -200,3 +204,20 @@ jobs:
 
     - name: Output Droplet IP
       run: echo "Droplet IP is ${{ env.DROPLET_IP }}"
+
+    - name: Setup SSL
+      run: |
+        ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
+        cd ~/app
+        
+        # Install certbot
+        apt-get update
+        apt-get install -y certbot python3-certbot-nginx
+        
+        # Get SSL certificate
+        certbot certonly --standalone -d ${{ inputs.domain }} --non-interactive --agree-tos -m admin@ayurvahi.com
+        
+        # Copy certificates to nginx ssl directory
+        cp /etc/letsencrypt/live/${{ inputs.domain }}/fullchain.pem nginx/ssl/
+        cp /etc/letsencrypt/live/${{ inputs.domain }}/privkey.pem nginx/ssl/
+        EOF

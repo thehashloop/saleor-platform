@@ -108,6 +108,23 @@ services:
     networks:
       - saleor-backend-tier
 
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./nginx/ssl:/etc/nginx/ssl
+      - ./nginx/www:/var/www/html
+    depends_on:
+      - api
+      - dashboard
+      - storefront
+    restart: unless-stopped
+    networks:
+      - saleor-backend-tier
+
 volumes:
   saleor-db:
     driver: local
