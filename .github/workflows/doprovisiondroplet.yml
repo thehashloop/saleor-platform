@@ -91,11 +91,13 @@ jobs:
         # Update docker-compose.yml with correct IP address
         sed -i "s#DASHBOARD_URL=http://localhost:9000/#DASHBOARD_URL=http://${{ env.DROPLET_IP }}:9000/#" docker-compose.yml
         sed -i "s/ALLOWED_HOSTS=localhost,api/ALLOWED_HOSTS=localhost,api,${{ env.DROPLET_IP }}/" docker-compose.yml
+        sed -i "s#API_URL=http://localhost:8000/#API_URL=http://${{ env.DROPLET_IP }}:8000/#" docker-compose.yml
         
         # Verify the changes
         echo "Checking updated configuration..."
         grep "DASHBOARD_URL" docker-compose.yml
         grep "ALLOWED_HOSTS" docker-compose.yml
+        grep "API_URL" docker-compose.yml
         EOF
 
     - name: Install Docker and Docker Compose
