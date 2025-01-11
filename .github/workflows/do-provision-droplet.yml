@@ -213,9 +213,13 @@ jobs:
         ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
         cd ~/app
         
-        # Stop both system nginx and docker nginx
-        systemctl stop nginx
-        docker compose down nginx
+        # Stop all services using port 80/443
+        systemctl stop nginx || true
+        docker compose down
+        
+        # Kill any remaining processes using port 80/443
+        lsof -ti:80 | xargs -r kill -9
+        lsof -ti:443 | xargs -r kill -9
         
         # Install certbot
         apt-get update
@@ -229,7 +233,7 @@ jobs:
         cp /etc/letsencrypt/live/${{ inputs.domain }}/fullchain.pem nginx/ssl/
         cp /etc/letsencrypt/live/${{ inputs.domain }}/privkey.pem nginx/ssl/
         
-        # Disable system nginx and start our docker nginx
+        # Disable system nginx and start our docker services
         systemctl disable nginx
-        docker compose up -d nginx
+        docker compose up -d
         EOF
