@@ -213,6 +213,9 @@ jobs:
         ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
         cd ~/app
         
+        # Stop nginx container temporarily
+        docker compose stop nginx
+        
         # Install certbot
         apt-get update
         apt-get install -y certbot python3-certbot-nginx
@@ -221,6 +224,10 @@ jobs:
         certbot certonly --standalone -d ${{ inputs.domain }} --non-interactive --agree-tos -m admin@ayurvahi.com
         
         # Copy certificates to nginx ssl directory
+        mkdir -p nginx/ssl
         cp /etc/letsencrypt/live/${{ inputs.domain }}/fullchain.pem nginx/ssl/
         cp /etc/letsencrypt/live/${{ inputs.domain }}/privkey.pem nginx/ssl/
+        
+        # Restart nginx container
+        docker compose up -d nginx
         EOF
