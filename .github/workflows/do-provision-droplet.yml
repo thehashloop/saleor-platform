@@ -112,22 +112,16 @@ jobs:
         sed -i "s#MEDIA_URL=http://localhost:8000/media/#MEDIA_URL=http://${{ env.DROPLET_IP }}:8000/media/#" backend.env
         sed -i "s/ALLOWED_CLIENT_HOSTS=localhost/ALLOWED_CLIENT_HOSTS=localhost,${{ env.DROPLET_IP }}/" backend.env
         
-        # Add RSA private key from SSH key - using printf to handle special characters
-        printf '%s' "${{ secrets.DO_SSH_PRIVATE_KEY }}" > /tmp/ssh_key.tmp
-        RSA_KEY=$(cat /tmp/ssh_key.tmp)
-        sed -i "s|RSA_PRIVATE_KEY=fixme|RSA_PRIVATE_KEY=${RSA_KEY}|" backend.env
-        rm /tmp/ssh_key.tmp
-        
-        # Verify RSA key is present (safely)
-        if grep -q "RSA_PRIVATE_KEY=fixme" backend.env; then
-          echo "ERROR: RSA_PRIVATE_KEY was not updated properly"
-          exit 1
-        elif ! grep -q "RSA_PRIVATE_KEY=-----BEGIN.*PRIVATE KEY-----" backend.env; then
-          echo "ERROR: RSA_PRIVATE_KEY is present but may not be in correct format"
-          exit 1
-        else
-          echo "✓ RSA_PRIVATE_KEY verified (key is present and appears to be in correct format)"
-        fi
+        # Verify the changes
+        echo "Checking updated configuration..."
+        grep "DASHBOARD_URL" docker-compose.yml
+        grep "ALLOWED_HOSTS" docker-compose.yml
+        grep "API_URL" docker-compose.yml
+        grep "NEXT_PUBLIC_SALEOR_API_URL" docker-compose.yml
+        grep "NEXT_PUBLIC_STOREFRONT_URL" docker-compose.yml
+        grep "PUBLIC_URL" backend.env
+        grep "MEDIA_URL" backend.env
+        grep "ALLOWED_CLIENT_HOSTS" backend.env
         EOF
 
     - name: Install Docker and Docker Compose
