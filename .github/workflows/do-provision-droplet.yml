@@ -276,10 +276,25 @@ jobs:
       run: |
         ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
         cd ~/app
+        
+        # Create SSL directory
         mkdir -p nginx/ssl
-        cp /etc/letsencrypt/live/${{ inputs.domain }}/fullchain.pem nginx/ssl/
-        cp /etc/letsencrypt/live/${{ inputs.domain }}/privkey.pem nginx/ssl/
-        systemctl disable nginx
+        
+        # Check if certificate exists and copy if it does
+        if [ -d "/etc/letsencrypt/live/${{ inputs.domain }}" ]; then
+          cp /etc/letsencrypt/live/${{ inputs.domain }}/fullchain.pem nginx/ssl/
+          cp /etc/letsencrypt/live/${{ inputs.domain }}/privkey.pem nginx/ssl/
+        else
+          echo "SSL certificates not found at /etc/letsencrypt/live/${{ inputs.domain }}"
+          exit 1
+        fi
+        
+        # Only try to disable nginx if it exists
+        if systemctl list-unit-files | grep -q nginx; then
+          systemctl disable nginx
+        else
+          echo "Nginx service not found, skipping disable"
+        fi
         EOF
 
     - name: Start Services with SSL
