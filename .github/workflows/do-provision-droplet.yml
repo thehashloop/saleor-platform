@@ -112,6 +112,9 @@ jobs:
         sed -i "s#MEDIA_URL=http://localhost:8000/media/#MEDIA_URL=http://${{ env.DROPLET_IP }}:8000/media/#" backend.env
         sed -i "s/ALLOWED_CLIENT_HOSTS=localhost/ALLOWED_CLIENT_HOSTS=localhost,${{ env.DROPLET_IP }}/" backend.env
         
+        # Add RSA private key from SSH key
+        sed -i "s#RSA_PRIVATE_KEY=#RSA_PRIVATE_KEY=${{ secrets.DO_SSH_PRIVATE_KEY }}#" backend.env
+        
         # Verify the changes
         echo "Checking updated configuration..."
         grep "DASHBOARD_URL" docker-compose.yml
