@@ -208,32 +208,44 @@ jobs:
     - name: Output Droplet IP
       run: echo "Droplet IP is ${{ env.DROPLET_IP }}"
 
-    - name: Setup SSL
+    - name: Stop Services for SSL Setup
       run: |
         ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
         cd ~/app
-        
-        # Stop all services using port 80/443
         systemctl stop nginx || true
         docker compose down
-        
         # Kill any remaining processes using port 80/443
         lsof -ti:80 | xargs -r kill -9
         lsof -ti:443 | xargs -r kill -9
-        
-        # Install certbot
+        EOF
+
+    - name: Install Certbot
+      run: |
+        ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
         apt-get update
         apt-get install -y certbot python3-certbot-nginx
-        
-        # Get SSL certificate
+        EOF
+
+    - name: Obtain SSL Certificate
+      run: |
+        ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
+        cd ~/app
         certbot certonly --standalone -d ${{ inputs.domain }} --non-interactive --agree-tos -m admin@ayurvahi.com
-        
-        # Copy certificates to nginx ssl directory
+        EOF
+
+    - name: Configure SSL for Nginx
+      run: |
+        ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
+        cd ~/app
         mkdir -p nginx/ssl
         cp /etc/letsencrypt/live/${{ inputs.domain }}/fullchain.pem nginx/ssl/
         cp /etc/letsencrypt/live/${{ inputs.domain }}/privkey.pem nginx/ssl/
-        
-        # Disable system nginx and start our docker services
         systemctl disable nginx
+        EOF
+
+    - name: Start Services with SSL
+      run: |
+        ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
+        cd ~/app
         docker compose up -d
         EOF
