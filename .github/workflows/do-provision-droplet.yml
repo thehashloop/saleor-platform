@@ -21,6 +21,10 @@ on:
         description: 'Superuser password'
         required: false
         type: string
+      reserved_ip:
+        description: 'Reserved IP address to assign to the droplet'
+        required: true
+        type: string
 
 jobs:
   provision:
@@ -64,30 +68,12 @@ jobs:
         
         echo "Droplet created with ID: ${DROPLET_ID}"
         
-        # Wait for network information to become available
-        echo "Waiting for network information..."
-        for i in {1..30}; do
-          echo "Attempt $i: Checking for IP address..."
-          DROPLET_DATA=$(doctl compute droplet get $DROPLET_ID --output json)
-          echo "Droplet data: $DROPLET_DATA"
-          
-          # Check if networks field exists and has v4 entries
-          DROPLET_IP=$(echo "$DROPLET_DATA" | jq -r '.[0].networks.v4 // [] | map(select(.type == "public")) | .[0].ip_address // empty')
-          
-          if [ ! -z "$DROPLET_IP" ]; then
-            echo "IP address found: ${DROPLET_IP}"
-            echo "DROPLET_IP=${DROPLET_IP}" >> $GITHUB_ENV
-            break
-          fi
-          
-          if [ $i -eq 30 ]; then
-            echo "Timeout waiting for IP address"
-            exit 1
-          fi
-          
-          echo "Sleeping for 10 seconds before next attempt..."
-          sleep 10
-        done
+        # Assign the reserved IP to the droplet
+        echo "Assigning reserved IP to droplet..."
+        doctl compute floating-ip-action assign ${{ inputs.reserved_ip }} $DROPLET_ID
+        
+        # Set the IP in environment for later use
+        echo "DROPLET_IP=${{ inputs.reserved_ip }}" >> $GITHUB_ENV
 
     - name: Wait for Droplet to Become Active
       run: |
