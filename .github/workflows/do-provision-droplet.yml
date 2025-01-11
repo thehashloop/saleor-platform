@@ -104,17 +104,20 @@ jobs:
         ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
         cd ~/app
         
-        # Update docker-compose.yml with correct IP address
-        sed -i "s#DASHBOARD_URL=http://localhost:9000/#DASHBOARD_URL=http://${{ env.DROPLET_IP }}:9000/#" docker-compose.yml
-        sed -i "s/ALLOWED_HOSTS=localhost,api/ALLOWED_HOSTS=localhost,api,${{ env.DROPLET_IP }}/" docker-compose.yml
-        sed -i "s#API_URL=http://localhost:8000/#API_URL=http://${{ env.DROPLET_IP }}:8000/#" docker-compose.yml
-        sed -i "s#NEXT_PUBLIC_SALEOR_API_URL=http://localhost:8000/#NEXT_PUBLIC_SALEOR_API_URL=http://${{ env.DROPLET_IP }}:8000/#" docker-compose.yml
-        sed -i "s#NEXT_PUBLIC_STOREFRONT_URL=http://localhost:3000#NEXT_PUBLIC_STOREFRONT_URL=http://${{ env.DROPLET_IP }}:3000#" docker-compose.yml
+        # Update docker-compose.yml with domain name
+        sed -i "s#DASHBOARD_URL=http://localhost:9000/#DASHBOARD_URL=https://${{ inputs.domain }}/dashboard/#" docker-compose.yml
+        sed -i "s/ALLOWED_HOSTS=localhost,api/ALLOWED_HOSTS=localhost,api,${{ inputs.domain }}/" docker-compose.yml
+        sed -i "s#API_URL=http://localhost:8000/#API_URL=https://${{ inputs.domain }}/graphql/#" docker-compose.yml
+        sed -i "s#NEXT_PUBLIC_SALEOR_API_URL=http://localhost:8000/#NEXT_PUBLIC_SALEOR_API_URL=https://${{ inputs.domain }}/graphql/#" docker-compose.yml
+        sed -i "s#NEXT_PUBLIC_STOREFRONT_URL=http://localhost:3000#NEXT_PUBLIC_STOREFRONT_URL=https://${{ inputs.domain }}#" docker-compose.yml
         
-        # Update backend.env with correct IP address
-        sed -i "s#PUBLIC_URL=http://localhost:8000#PUBLIC_URL=http://${{ env.DROPLET_IP }}:8000#" backend.env
-        sed -i "s#MEDIA_URL=http://localhost:8000/media/#MEDIA_URL=http://${{ env.DROPLET_IP }}:8000/media/#" backend.env
-        sed -i "s/ALLOWED_CLIENT_HOSTS=localhost/ALLOWED_CLIENT_HOSTS=localhost,${{ env.DROPLET_IP }}/" backend.env
+        # Update backend.env with domain name
+        sed -i "s#PUBLIC_URL=http://localhost:8000#PUBLIC_URL=https://${{ inputs.domain }}#" backend.env
+        sed -i "s#MEDIA_URL=http://localhost:8000/media/#MEDIA_URL=https://${{ inputs.domain }}/media/#" backend.env
+        sed -i "s/ALLOWED_CLIENT_HOSTS=localhost/ALLOWED_CLIENT_HOSTS=localhost,${{ inputs.domain }}/" backend.env
+        
+        # Set DOMAIN environment variable for nginx template
+        echo "DOMAIN=${{ inputs.domain }}" > .env
         
         # Verify the changes
         echo "Checking updated configuration..."
