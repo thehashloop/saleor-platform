@@ -31,7 +31,7 @@ services:
       - 9000:80
     restart: unless-stopped
     environment:
-      - API_URL=http://localhost:8000/
+      - API_URL=http://localhost:8000/graphql/
 
   db:
     image: library/postgres:15-alpine
