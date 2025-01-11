@@ -166,12 +166,10 @@ jobs:
         ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
         cd ~/app
         
-        # Create superuser non-interactively
-        docker compose run --rm api python3 manage.py createsuperuser \
-          --noinput \
-          --email "${{ inputs.superuser_email }}" \
-          --username "${{ inputs.superuser_email }}" \
-          DJANGO_SUPERUSER_PASSWORD="${{ inputs.superuser_password }}"
+        # Create superuser using environment variables
+        docker compose run --rm -e DJANGO_SUPERUSER_PASSWORD="${{ inputs.superuser_password }}" \
+          -e DJANGO_SUPERUSER_EMAIL="${{ inputs.superuser_email }}" \
+          api python3 manage.py createsuperuser --noinput
         
         echo "Superuser created successfully"
         EOF
