@@ -194,34 +194,32 @@ jobs:
         # Login to GitHub Container Registry
         echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
         
-        # Start services in detached mode
+        # Stop all services
+        docker compose down
+        
+        # Start services again
         docker compose up -d
         
-        # Wait for services to be healthy
-        echo "Waiting for services to start..."
-        sleep 30
-        
-        # Check container status
-        docker compose ps
+        # Check logs
+        docker compose logs nginx
         EOF
 
     - name: Output Droplet IP
       run: echo "Droplet IP is ${{ env.DROPLET_IP }}"
 
-    - name: Configure Firewall for SSL
+    - name: Configure Firewall
       run: |
         ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
         # Allow HTTP and HTTPS traffic
         ufw allow 80/tcp
         ufw allow 443/tcp
+        ufw allow 8000/tcp
+        ufw allow 9000/tcp
+        ufw allow 3000/tcp
         ufw --force enable
         
-        # Install netstat for debugging
-        apt-get update
-        apt-get install -y net-tools
-        
-        # Verify ports are accessible
-        netstat -tulpn | grep -E ':80|:443' || echo "Ports are free"
+        # Verify firewall rules
+        ufw status
         EOF
 
     - name: Stop Services for SSL Setup
@@ -302,4 +300,16 @@ jobs:
         ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
         cd ~/app
         docker compose up -d
+        EOF
+
+    - name: Configure Nginx
+      run: |
+        ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
+        cd ~/app
+        
+        # Create the default.conf from template
+        envsubst '\${DOMAIN}' < nginx/conf.d/default.conf.template > nginx/conf.d/default.conf
+        
+        # Verify the configuration
+        cat nginx/conf.d/default.conf
         EOF
