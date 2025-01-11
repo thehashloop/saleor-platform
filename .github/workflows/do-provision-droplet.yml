@@ -282,24 +282,17 @@ jobs:
         if [ -d "/etc/letsencrypt/live/${{ inputs.domain }}" ]; then
           cp /etc/letsencrypt/live/${{ inputs.domain }}/fullchain.pem nginx/ssl/
           cp /etc/letsencrypt/live/${{ inputs.domain }}/privkey.pem nginx/ssl/
+          
+          # Set proper permissions
+          chmod 644 nginx/ssl/fullchain.pem
+          chmod 644 nginx/ssl/privkey.pem
+          
+          # Verify files exist and permissions
+          ls -l nginx/ssl/
         else
           echo "SSL certificates not found at /etc/letsencrypt/live/${{ inputs.domain }}"
           exit 1
         fi
-        
-        # Only try to disable nginx if it exists
-        if systemctl list-unit-files | grep -q nginx; then
-          systemctl disable nginx
-        else
-          echo "Nginx service not found, skipping disable"
-        fi
-        EOF
-
-    - name: Start Services with SSL
-      run: |
-        ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
-        cd ~/app
-        docker compose up -d
         EOF
 
     - name: Configure Nginx
@@ -312,4 +305,32 @@ jobs:
         
         # Verify the configuration
         cat nginx/conf.d/default.conf
+        EOF
+
+    - name: Start Services with SSL
+      run: |
+        ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
+        cd ~/app
+        docker compose up -d
+        EOF
+
+    - name: Debug Service Status
+      run: |
+        ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
+        cd ~/app
+        
+        # Check container status
+        docker compose ps
+        
+        # Check nginx logs
+        docker compose logs nginx
+        
+        # Check if ports are actually bound
+        netstat -tulpn | grep -E '::443'
+        
+        # Check nginx configuration
+        docker compose exec nginx nginx -t
+        
+        # Check SSL certificate permissions
+        ls -l nginx/ssl/
         EOF
