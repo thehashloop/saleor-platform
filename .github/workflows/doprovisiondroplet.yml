@@ -1,7 +1,13 @@
 name: Provision DigitalOcean Droplet
 
 on:
-  workflow_dispatch: # Trigger manually or as needed
+  workflow_dispatch:
+    inputs:
+      populate_db:
+        description: 'Populate database with sample data'
+        required: true
+        type: boolean
+        default: false
 
 jobs:
   provision:
@@ -127,6 +133,18 @@ jobs:
         
         # Run migrations
         docker compose run --rm api python3 manage.py migrate
+        EOF
+
+    - name: Populate Database
+      if: ${{ inputs.populate_db }}
+      run: |
+        ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
+        cd ~/app
+        
+        # Populate database with sample data
+        docker compose run --rm api python3 manage.py populatedb
+        
+        echo "Database populated with sample data"
         EOF
 
     - name: Start Services
