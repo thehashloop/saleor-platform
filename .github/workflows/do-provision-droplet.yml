@@ -300,11 +300,18 @@ jobs:
         ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
         cd ~/app
         
+        # Export DOMAIN variable
+        export DOMAIN=${{ inputs.domain }}
+        
         # Create the default.conf from template
         envsubst '\${DOMAIN}' < nginx/conf.d/default.conf.template > nginx/conf.d/default.conf
         
         # Verify the configuration
+        echo "Checking nginx configuration:"
         cat nginx/conf.d/default.conf
+        
+        # Verify DOMAIN variable
+        echo "DOMAIN variable value: \$DOMAIN"
         EOF
 
     - name: Start Services with SSL
