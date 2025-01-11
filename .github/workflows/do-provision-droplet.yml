@@ -112,19 +112,10 @@ jobs:
         sed -i "s#MEDIA_URL=http://localhost:8000/media/#MEDIA_URL=http://${{ env.DROPLET_IP }}:8000/media/#" backend.env
         sed -i "s/ALLOWED_CLIENT_HOSTS=localhost/ALLOWED_CLIENT_HOSTS=localhost,${{ env.DROPLET_IP }}/" backend.env
         
-        # Add RSA private key from SSH key
-        sed -i "s#RSA_PRIVATE_KEY=fixme#RSA_PRIVATE_KEY=${{ secrets.DO_SSH_PRIVATE_KEY }}#" backend.env
-        
-        # Verify the changes
-        echo "Checking updated configuration..."
-        grep "DASHBOARD_URL" docker-compose.yml
-        grep "ALLOWED_HOSTS" docker-compose.yml
-        grep "API_URL" docker-compose.yml
-        grep "NEXT_PUBLIC_SALEOR_API_URL" docker-compose.yml
-        grep "NEXT_PUBLIC_STOREFRONT_URL" docker-compose.yml
-        grep "PUBLIC_URL" backend.env
-        grep "MEDIA_URL" backend.env
-        grep "ALLOWED_CLIENT_HOSTS" backend.env
+        # Add RSA private key from SSH key - using a different delimiter to avoid issues with key content
+        echo "${{ secrets.DO_SSH_PRIVATE_KEY }}" > /tmp/ssh_key.tmp
+        sed -i "s#RSA_PRIVATE_KEY=fixme#RSA_PRIVATE_KEY=$(cat /tmp/ssh_key.tmp | sed -E ':a;N;$!ba;s/\r{0,1}\n/\\n/g')#" backend.env
+        rm /tmp/ssh_key.tmp
         
         # Verify RSA key is present (safely)
         if grep -q "RSA_PRIVATE_KEY=fixme" backend.env; then
