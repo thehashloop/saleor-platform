@@ -290,14 +290,12 @@ jobs:
         # Create temp directory for certificates
         mkdir -p .certificates
         
-        # Try to download existing certificates from Spaces
-        if aws s3 cp s3://${{ inputs.spaces_name }}/certificates/${{ inputs.domain }}/fullchain.pem \
-          .certificates/fullchain.pem \
-          --endpoint=https://${{ inputs.spaces_region }}.digitaloceanspaces.com; then
+        # Try to download existing certificates from Spaces using doctl
+        if doctl spaces objects get ${{ inputs.spaces_name }}/certificates/${{ inputs.domain }}/fullchain.pem \
+          --region ${{ inputs.spaces_region }} > .certificates/fullchain.pem; then
           
-          aws s3 cp s3://${{ inputs.spaces_name }}/certificates/${{ inputs.domain }}/privkey.pem \
-            .certificates/privkey.pem \
-            --endpoint=https://${{ inputs.spaces_region }}.digitaloceanspaces.com
+          doctl spaces objects get ${{ inputs.spaces_name }}/certificates/${{ inputs.domain }}/privkey.pem \
+            --region ${{ inputs.spaces_region }} > .certificates/privkey.pem
           
           # Check if certificates are valid
           if openssl x509 -checkend 2592000 -noout -in .certificates/fullchain.pem; then
@@ -339,14 +337,16 @@ jobs:
           exit 1
         fi
         
-        # Upload new certificates to Spaces
-        aws s3 cp /etc/letsencrypt/live/${{ inputs.domain }}/fullchain.pem \
-          s3://${{ inputs.spaces_name }}/certificates/${{ inputs.domain }}/fullchain.pem \
-          --endpoint=https://${{ inputs.spaces_region }}.digitaloceanspaces.com
-        
-        aws s3 cp /etc/letsencrypt/live/${{ inputs.domain }}/privkey.pem \
-          s3://${{ inputs.spaces_name }}/certificates/${{ inputs.domain }}/privkey.pem \
-          --endpoint=https://${{ inputs.spaces_region }}.digitaloceanspaces.com
+        # Upload new certificates to Spaces using doctl
+        doctl spaces objects upload ${{ inputs.spaces_name }} \
+          --region ${{ inputs.spaces_region }} \
+          /etc/letsencrypt/live/${{ inputs.domain }}/fullchain.pem \
+          --destination certificates/${{ inputs.domain }}/fullchain.pem
+
+        doctl spaces objects upload ${{ inputs.spaces_name }} \
+          --region ${{ inputs.spaces_region }} \
+          /etc/letsencrypt/live/${{ inputs.domain }}/privkey.pem \
+          --destination certificates/${{ inputs.domain }}/privkey.pem
         EOF
 
     - name: Configure SSL for Nginx
