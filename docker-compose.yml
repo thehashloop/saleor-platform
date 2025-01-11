@@ -32,6 +32,15 @@ services:
     restart: unless-stopped
     environment:
       - API_URL=http://localhost:8000/graphql/
+  
+  storefront:
+    image: ghcr.io/thehashloop/storefront:latest
+    ports:
+      - 3000:3000
+    restart: unless-stopped
+    environment:
+      - NEXT_PUBLIC_SALEOR_API_URL=http://localhost:8000/graphql/
+      - NEXT_PUBLIC_STOREFRONT_URL=http://localhost:3000
 
   db:
     image: library/postgres:15-alpine
