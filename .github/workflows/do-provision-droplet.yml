@@ -257,17 +257,36 @@ jobs:
         ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
         cd ~/app
         
-        # Double check ports are free
-        netstat -tulpn | grep -E ':80|:443' || echo "Ports are free"
-        
-        # Try to obtain certificate
-        certbot certonly --standalone \
-          --preferred-challenges http \
-          -d ${{ inputs.domain }} \
-          --non-interactive \
-          --agree-tos \
-          -m admin@ayurvahi.com \
-          --debug
+        # Check if we already have valid certificates
+        if [ -d "/etc/letsencrypt/live/${{ inputs.domain }}" ] && \
+           openssl x509 -checkend 2592000 -noout -in "/etc/letsencrypt/live/${{ inputs.domain }}/fullchain.pem"; then
+          echo "Found valid existing certificates, skipping certificate request"
+        else
+          # Double check ports are free
+          netstat -tulpn | grep -E ':80|:443' || echo "Ports are free"
+          
+          # Install netstat if not present
+          command -v netstat >/dev/null 2>&1 || { apt-get update && apt-get install -y net-tools; }
+          
+          # Try to obtain certificate
+          if certbot certonly --standalone \
+            --preferred-challenges http \
+            -d ${{ inputs.domain }} \
+            --non-interactive \
+            --agree-tos \
+            -m admin@ayurvahi.com \
+            --debug; then
+            echo "Successfully obtained new certificates"
+          else
+            echo "Failed to obtain new certificates, checking for existing ones..."
+            if [ -d "/etc/letsencrypt/live/${{ inputs.domain }}" ]; then
+              echo "Using existing certificates"
+            else
+              echo "No valid certificates found"
+              exit 1
+            fi
+          fi
+        fi
         EOF
 
     - name: Configure SSL for Nginx
