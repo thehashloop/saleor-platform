@@ -113,7 +113,7 @@ jobs:
         sed -i "s/ALLOWED_CLIENT_HOSTS=localhost/ALLOWED_CLIENT_HOSTS=localhost,${{ env.DROPLET_IP }}/" backend.env
         
         # Add RSA private key from SSH key
-        sed -i "s#RSA_PRIVATE_KEY=#RSA_PRIVATE_KEY=${{ secrets.DO_SSH_PRIVATE_KEY }}#" backend.env
+        sed -i "s#RSA_PRIVATE_KEY=fixme#RSA_PRIVATE_KEY=${{ secrets.DO_SSH_PRIVATE_KEY }}#" backend.env
         
         # Verify the changes
         echo "Checking updated configuration..."
@@ -125,6 +125,20 @@ jobs:
         grep "PUBLIC_URL" backend.env
         grep "MEDIA_URL" backend.env
         grep "ALLOWED_CLIENT_HOSTS" backend.env
+        
+        # Verify RSA key is present (safely)
+        if grep -q "RSA_PRIVATE_KEY=fixme" backend.env; then
+          echo "ERROR: RSA_PRIVATE_KEY was not updated properly"
+          exit 1
+        else
+          # Verify the key starts with proper SSH key format
+          if grep -q "RSA_PRIVATE_KEY=-----BEGIN" backend.env; then
+            echo "✓ RSA_PRIVATE_KEY verified (key is present and appears to be in correct format)"
+          else
+            echo "ERROR: RSA_PRIVATE_KEY is present but may not be in correct format"
+            exit 1
+          fi
+        fi
         EOF
 
     - name: Install Docker and Docker Compose
