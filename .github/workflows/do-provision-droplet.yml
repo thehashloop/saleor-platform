@@ -212,25 +212,48 @@ jobs:
       run: |
         ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
         cd ~/app
+        
+        echo "Stopping system nginx..."
         systemctl stop nginx || true
+        
+        echo "Stopping docker containers..."
         docker compose down
-        # Kill any remaining processes using port 80/443
+        
+        echo "Checking for processes using ports 80 and 443..."
+        netstat -tulpn | grep -E ':80|:443'
+        
+        echo "Killing any processes using ports 80 and 443..."
         lsof -ti:80 | xargs -r kill -9
         lsof -ti:443 | xargs -r kill -9
+        
+        echo "Verifying ports are free..."
+        netstat -tulpn | grep -E ':80|:443' || echo "Ports are free"
         EOF
 
     - name: Install Certbot
       run: |
         ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
         apt-get update
-        apt-get install -y certbot python3-certbot-nginx
+        apt-get remove -y nginx nginx-common || true
+        apt-get install -y certbot
         EOF
 
     - name: Obtain SSL Certificate
       run: |
         ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
         cd ~/app
-        certbot certonly --standalone -d ${{ inputs.domain }} --non-interactive --agree-tos -m admin@ayurvahi.com
+        
+        # Double check ports are free
+        netstat -tulpn | grep -E ':80|:443' || echo "Ports are free"
+        
+        # Try to obtain certificate
+        certbot certonly --standalone \
+          --preferred-challenges http \
+          -d ${{ inputs.domain }} \
+          --non-interactive \
+          --agree-tos \
+          -m admin@ayurvahi.com \
+          --debug
         EOF
 
     - name: Configure SSL for Nginx
