@@ -29,6 +29,16 @@ on:
         description: 'Domain name to use (e.g. test.ayurvahi.com)'
         required: true
         type: string
+      spaces_name:
+        description: 'DigitalOcean Spaces bucket name'
+        required: true
+        type: string
+        default: 'ayurvahi-certs'
+      spaces_region:
+        description: 'DigitalOcean Spaces region'
+        required: true
+        type: string
+        default: 'blr1'
 
 jobs:
   provision:
@@ -252,41 +262,83 @@ jobs:
         apt-get install -y certbot
         EOF
 
-    - name: Obtain SSL Certificate
+    - name: Install AWS CLI
+      run: |
+        curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+        unzip awscliv2.zip
+        sudo ./aws/install
+
+    - name: Configure AWS CLI for Spaces
+      run: |
+        aws configure set aws_access_key_id ${{ secrets.SPACES_ACCESS_KEY }}
+        aws configure set aws_secret_access_key ${{ secrets.SPACES_SECRET_KEY }}
+        aws configure set default.region ${{ inputs.spaces_region }}
+
+    - name: Check Existing Certificates in Spaces
       run: |
         ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
         cd ~/app
         
-        # Check if we already have valid certificates
-        if [ -d "/etc/letsencrypt/live/${{ inputs.domain }}" ] && \
-           openssl x509 -checkend 2592000 -noout -in "/etc/letsencrypt/live/${{ inputs.domain }}/fullchain.pem"; then
-          echo "Found valid existing certificates, skipping certificate request"
-        else
-          # Double check ports are free
-          netstat -tulpn | grep -E ':80|:443' || echo "Ports are free"
+        # Create temp directory for certificates
+        mkdir -p .certificates
+        
+        # Try to download existing certificates from Spaces
+        if aws s3 cp s3://${{ inputs.spaces_name }}/certificates/${{ inputs.domain }}/fullchain.pem \
+          .certificates/fullchain.pem \
+          --endpoint=https://${{ inputs.spaces_region }}.digitaloceanspaces.com; then
           
-          # Install netstat if not present
-          command -v netstat >/dev/null 2>&1 || { apt-get update && apt-get install -y net-tools; }
+          aws s3 cp s3://${{ inputs.spaces_name }}/certificates/${{ inputs.domain }}/privkey.pem \
+            .certificates/privkey.pem \
+            --endpoint=https://${{ inputs.spaces_region }}.digitaloceanspaces.com
           
-          # Try to obtain certificate
-          if certbot certonly --standalone \
-            --preferred-challenges http \
-            -d ${{ inputs.domain }} \
-            --non-interactive \
-            --agree-tos \
-            -m admin@ayurvahi.com \
-            --debug; then
-            echo "Successfully obtained new certificates"
+          # Check if certificates are valid
+          if openssl x509 -checkend 2592000 -noout -in .certificates/fullchain.pem; then
+            echo "Found valid certificates in Spaces"
+            mkdir -p /etc/letsencrypt/live/${{ inputs.domain }}
+            cp .certificates/fullchain.pem /etc/letsencrypt/live/${{ inputs.domain }}/
+            cp .certificates/privkey.pem /etc/letsencrypt/live/${{ inputs.domain }}/
+            echo "VALID_CERT_EXISTS=true" >> $GITHUB_ENV
           else
-            echo "Failed to obtain new certificates, checking for existing ones..."
-            if [ -d "/etc/letsencrypt/live/${{ inputs.domain }}" ]; then
-              echo "Using existing certificates"
-            else
-              echo "No valid certificates found"
-              exit 1
-            fi
+            echo "Certificates exist but are expired"
+            echo "VALID_CERT_EXISTS=false" >> $GITHUB_ENV
           fi
+        else
+          echo "No existing certificates found in Spaces"
+          echo "VALID_CERT_EXISTS=false" >> $GITHUB_ENV
         fi
+        EOF
+
+    - name: Try ZeroSSL if Let's Encrypt Fails
+      if: ${{ env.VALID_CERT_EXISTS != 'true' }}
+      run: |
+        ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
+        cd ~/app
+        
+        # Install certbot-dns-digitalocean plugin
+        pip3 install certbot-dns-digitalocean
+        
+        # Try ZeroSSL with DNS challenge
+        if ! certbot certonly --standalone \
+          --preferred-challenges http \
+          -d ${{ inputs.domain }} \
+          --non-interactive \
+          --agree-tos \
+          -m admin@ayurvahi.com \
+          --server https://acme.zerossl.com/v2/DV90 \
+          --eab-kid ${{ secrets.ZEROSSL_KID }} \
+          --eab-hmac-key ${{ secrets.ZEROSSL_HMAC_KEY }}; then
+          echo "Failed to obtain certificates from ZeroSSL"
+          exit 1
+        fi
+        
+        # Upload new certificates to Spaces
+        aws s3 cp /etc/letsencrypt/live/${{ inputs.domain }}/fullchain.pem \
+          s3://${{ inputs.spaces_name }}/certificates/${{ inputs.domain }}/fullchain.pem \
+          --endpoint=https://${{ inputs.spaces_region }}.digitaloceanspaces.com
+        
+        aws s3 cp /etc/letsencrypt/live/${{ inputs.domain }}/privkey.pem \
+          s3://${{ inputs.spaces_name }}/certificates/${{ inputs.domain }}/privkey.pem \
+          --endpoint=https://${{ inputs.spaces_region }}.digitaloceanspaces.com
         EOF
 
     - name: Configure SSL for Nginx
