@@ -68,6 +68,13 @@ jobs:
         
         echo "Droplet created with ID: ${DROPLET_ID}"
         
+        # Wait for droplet to be active
+        echo "Waiting for droplet to become active..."
+        while [[ $(doctl compute droplet get $DROPLET_ID --format Status --no-header) != "active" ]]; do
+          echo "Waiting for droplet to become active..."
+          sleep 10
+        done
+        
         # Assign the reserved IP to the droplet
         echo "Assigning reserved IP to droplet..."
         doctl compute floating-ip-action assign ${{ inputs.reserved_ip }} $DROPLET_ID
