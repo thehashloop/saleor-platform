@@ -177,7 +177,7 @@ jobs:
         cd ~/app
         
         # Login to GitHub Container Registry
-        echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+        echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
         
         # Start services in detached mode
         docker compose up -d
