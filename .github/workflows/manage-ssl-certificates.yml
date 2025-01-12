@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       domain:
-        description: 'Domain name for the certificate'
+        description: 'Root domain (e.g., example.com)'
         required: true
       spaces_name:
         description: 'Name of the DigitalOcean Space'
@@ -13,6 +13,9 @@ on:
         description: 'Region of the DigitalOcean Space'
         required: true
         default: 'blr1'
+      do_token:
+        description: 'DigitalOcean API Token'
+        required: true
 
 jobs:
   manage-certificates:
@@ -60,30 +63,29 @@ jobs:
           echo "No existing certificates found in Spaces"
         fi
 
-    - name: Get New ZeroSSL Certificate
+    - name: Get Let's Encrypt Wildcard Certificate
       if: success() || failure()
       run: |
-        # Install certbot and plugins
+        # Install certbot and DNS plugin
         sudo apt-get update
-        sudo apt-get install -y python3-pip
-        sudo pip3 install certbot certbot-dns-digitalocean
+        sudo apt-get install -y certbot
+        sudo pip3 install certbot-dns-digitalocean
+
+        # Configure DNS plugin
+        mkdir -p ~/.secrets/
+        echo "dns_digitalocean_token = ${{ inputs.do_token }}" > ~/.secrets/digitalocean.ini
+        chmod 600 ~/.secrets/digitalocean.ini
         
-        # Stop any processes using port 80
-        sudo lsof -ti:80 | xargs -r sudo kill -9
-        
-        # Create required directories
-        sudo mkdir -p /etc/letsencrypt/live/${{ inputs.domain }}
-        
-        # Try to get certificate from ZeroSSL with verbose output
-        sudo certbot certonly --standalone \
-          --preferred-challenges http \
-          -d ${{ inputs.domain }} \
+        # Try to get wildcard certificate from Let's Encrypt
+        sudo certbot certonly \
+          --dns-digitalocean \
+          --dns-digitalocean-credentials ~/.secrets/digitalocean.ini \
+          --dns-digitalocean-propagation-seconds 60 \
+          -d "${{ inputs.domain }}" \
+          -d "*.${{ inputs.domain }}" \
           --non-interactive \
           --agree-tos \
           -m admin@ayurvahi.com \
-          --server https://acme.zerossl.com/v2/DV90 \
-          --eab-kid "${{ secrets.ZEROSSL_KID }}" \
-          --eab-hmac-key "${{ secrets.ZEROSSL_HMAC_KEY }}" \
           --cert-name ${{ inputs.domain }} \
           -v
         
