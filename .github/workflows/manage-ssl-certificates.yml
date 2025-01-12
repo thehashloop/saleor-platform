@@ -63,10 +63,10 @@ jobs:
     - name: Get New ZeroSSL Certificate
       if: success() || failure()
       run: |
-        # Install certbot and plugin
+        # Install certbot and plugins
         sudo apt-get update
         sudo apt-get install -y python3-pip
-        sudo pip3 install certbot
+        sudo pip3 install certbot certbot-dns-digitalocean
         
         # Stop any processes using port 80
         sudo lsof -ti:80 | xargs -r sudo kill -9
@@ -80,7 +80,7 @@ jobs:
           -d ${{ inputs.domain }} \
           --non-interactive \
           --agree-tos \
-          --register-unsafely-without-email \
+          -m admin@ayurvahi.com \
           --server https://acme.zerossl.com/v2/DV90 \
           --eab-kid "${{ secrets.ZEROSSL_KID }}" \
           --eab-hmac-key "${{ secrets.ZEROSSL_HMAC_KEY }}" \
