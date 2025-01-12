@@ -68,20 +68,30 @@ jobs:
         sudo apt-get install -y python3-pip
         sudo pip3 install certbot
         
+        # Stop any processes using port 80
+        sudo lsof -ti:80 | xargs -r sudo kill -9
+        
         # Create required directories
         sudo mkdir -p /etc/letsencrypt/live/${{ inputs.domain }}
         
-        # Try to get certificate from ZeroSSL
+        # Try to get certificate from ZeroSSL with verbose output
         sudo certbot certonly --standalone \
           --preferred-challenges http \
           -d ${{ inputs.domain }} \
           --non-interactive \
           --agree-tos \
-          -m admin@ayurvahi.com \
+          --register-unsafely-without-email \
           --server https://acme.zerossl.com/v2/DV90 \
           --eab-kid "${{ secrets.ZEROSSL_KID }}" \
           --eab-hmac-key "${{ secrets.ZEROSSL_HMAC_KEY }}" \
-          --cert-name ${{ inputs.domain }}
+          --cert-name ${{ inputs.domain }} \
+          -v
+        
+        # Show debug info after certificate request
+        echo "Directory structure after certbot:"
+        sudo ls -la /etc/letsencrypt/
+        sudo ls -la /etc/letsencrypt/live/ || true
+        sudo ls -la /etc/letsencrypt/archive/ || true
 
     - name: Upload Certificates to Spaces
       if: success()
