@@ -18,6 +18,31 @@ jobs:
   manage-certificates:
     runs-on: ubuntu-latest
     steps:
+    - name: Verify Domain in DigitalOcean
+      run: |
+        # Check if domain exists in DigitalOcean
+        DOMAIN_CHECK=$(curl -s -X GET \
+          -H "Authorization: Bearer ${{ secrets.DO_TOKEN }}" \
+          "https://api.digitalocean.com/v2/domains/${{ inputs.domain }}")
+        
+        if echo "$DOMAIN_CHECK" | grep -q "not_found"; then
+          echo "Domain not found in DigitalOcean. Adding domain..."
+          curl -X POST \
+            -H "Authorization: Bearer ${{ secrets.DO_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"name\":\"${{ inputs.domain }}\"}" \
+            "https://api.digitalocean.com/v2/domains"
+          
+          echo "Domain added. Please update your nameservers at GoDaddy to:"
+          echo "ns1.digitalocean.com"
+          echo "ns2.digitalocean.com"
+          echo "ns3.digitalocean.com"
+          echo "Then re-run this workflow after DNS propagation (usually 24-48 hours)"
+          exit 1
+        else
+          echo "Domain found in DigitalOcean. Proceeding with certificate generation."
+        fi
+
     - name: Check Existing Certificates in Spaces
       run: |
         # Install s3cmd
