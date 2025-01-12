@@ -341,7 +341,11 @@ jobs:
         # Create required directories
         mkdir -p /etc/letsencrypt/live/${{ inputs.domain }}
         
-        # Try ZeroSSL with HTTP challenge
+        # Show debug info before certificate request
+        echo "Current directory structure:"
+        ls -la /etc/letsencrypt/
+        
+        # Try ZeroSSL with HTTP challenge and verbose output
         certbot certonly --standalone \
           --preferred-challenges http \
           -d ${{ inputs.domain }} \
@@ -351,29 +355,54 @@ jobs:
           --server https://acme.zerossl.com/v2/DV90 \
           --eab-kid "${{ secrets.ZEROSSL_KID }}" \
           --eab-hmac-key "${{ secrets.ZEROSSL_HMAC_KEY }}" \
-          --cert-name ${{ inputs.domain }}
+          --cert-name ${{ inputs.domain }} \
+          -v
         
-        if [ $? -eq 0 ]; then
+        CERT_EXIT_CODE=$?
+        echo "Certbot exit code: \$CERT_EXIT_CODE"
+        
+        # Show debug info after certificate request
+        echo "Directory structure after certbot:"
+        ls -la /etc/letsencrypt/
+        ls -la /etc/letsencrypt/live/ || true
+        ls -la /etc/letsencrypt/archive/ || true
+        
+        if [ \$CERT_EXIT_CODE -eq 0 ]; then
           echo "Successfully obtained certificates from ZeroSSL"
           
-          # Verify certificates exist
-          if [ -f "/etc/letsencrypt/live/${{ inputs.domain }}/fullchain.pem" ] && [ -f "/etc/letsencrypt/live/${{ inputs.domain }}/privkey.pem" ]; then
-            # Upload new certificates to Spaces
-            s3cmd put "/etc/letsencrypt/live/${{ inputs.domain }}/fullchain.pem" \
+          # Find the actual certificate files
+          CERT_DIR=\$(find /etc/letsencrypt/live -type l -name fullchain.pem | head -n 1 | xargs dirname)
+          echo "Found certificate directory: \$CERT_DIR"
+          
+          if [ -n "\$CERT_DIR" ] && [ -L "\$CERT_DIR/fullchain.pem" ] && [ -L "\$CERT_DIR/privkey.pem" ]; then
+            # Get the actual files from archive
+            REAL_FULLCHAIN=\$(readlink -f "\$CERT_DIR/fullchain.pem")
+            REAL_PRIVKEY=\$(readlink -f "\$CERT_DIR/privkey.pem")
+            
+            echo "Real certificate paths:"
+            echo "Fullchain: \$REAL_FULLCHAIN"
+            echo "Privkey: \$REAL_PRIVKEY"
+            
+            # Upload the actual certificate files to Spaces
+            s3cmd put "\$REAL_FULLCHAIN" \
               "s3://${{ inputs.spaces_name }}/certificates/${{ inputs.domain }}/fullchain.pem"
             
-            s3cmd put "/etc/letsencrypt/live/${{ inputs.domain }}/privkey.pem" \
+            s3cmd put "\$REAL_PRIVKEY" \
               "s3://${{ inputs.spaces_name }}/certificates/${{ inputs.domain }}/privkey.pem"
             
-            echo "Certificates uploaded to Spaces"
+            # Copy to the expected location
+            cp "\$REAL_FULLCHAIN" "/etc/letsencrypt/live/${{ inputs.domain }}/fullchain.pem"
+            cp "\$REAL_PRIVKEY" "/etc/letsencrypt/live/${{ inputs.domain }}/privkey.pem"
+            
+            echo "Certificates copied and uploaded"
             ls -l "/etc/letsencrypt/live/${{ inputs.domain }}/"
           else
-            echo "Certificates not found in expected location"
-            find /etc/letsencrypt -type f -name "*.pem"
+            echo "Could not find certificate symlinks"
             exit 1
           fi
         else
           echo "Failed to obtain certificates from ZeroSSL"
+          cat /var/log/letsencrypt/letsencrypt.log
           exit 1
         fi
         EOF
