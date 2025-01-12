@@ -338,6 +338,9 @@ jobs:
         systemctl stop nginx || true
         docker compose down || true
         
+        # Create required directories
+        mkdir -p /etc/letsencrypt/live/${{ inputs.domain }}
+        
         # Try ZeroSSL with HTTP challenge
         certbot certonly --standalone \
           --preferred-challenges http \
@@ -347,19 +350,28 @@ jobs:
           -m admin@ayurvahi.com \
           --server https://acme.zerossl.com/v2/DV90 \
           --eab-kid "${{ secrets.ZEROSSL_KID }}" \
-          --eab-hmac-key "${{ secrets.ZEROSSL_HMAC_KEY }}"
+          --eab-hmac-key "${{ secrets.ZEROSSL_HMAC_KEY }}" \
+          --cert-name ${{ inputs.domain }}
         
         if [ $? -eq 0 ]; then
           echo "Successfully obtained certificates from ZeroSSL"
           
-          # Upload new certificates to Spaces
-          s3cmd put /etc/letsencrypt/live/${{ inputs.domain }}/fullchain.pem \
-            s3://${{ inputs.spaces_name }}/certificates/${{ inputs.domain }}/fullchain.pem
-          
-          s3cmd put /etc/letsencrypt/live/${{ inputs.domain }}/privkey.pem \
-            s3://${{ inputs.spaces_name }}/certificates/${{ inputs.domain }}/privkey.pem
-          
-          echo "Certificates uploaded to Spaces"
+          # Verify certificates exist
+          if [ -f "/etc/letsencrypt/live/${{ inputs.domain }}/fullchain.pem" ] && [ -f "/etc/letsencrypt/live/${{ inputs.domain }}/privkey.pem" ]; then
+            # Upload new certificates to Spaces
+            s3cmd put "/etc/letsencrypt/live/${{ inputs.domain }}/fullchain.pem" \
+              "s3://${{ inputs.spaces_name }}/certificates/${{ inputs.domain }}/fullchain.pem"
+            
+            s3cmd put "/etc/letsencrypt/live/${{ inputs.domain }}/privkey.pem" \
+              "s3://${{ inputs.spaces_name }}/certificates/${{ inputs.domain }}/privkey.pem"
+            
+            echo "Certificates uploaded to Spaces"
+            ls -l "/etc/letsencrypt/live/${{ inputs.domain }}/"
+          else
+            echo "Certificates not found in expected location"
+            find /etc/letsencrypt -type f -name "*.pem"
+            exit 1
+          fi
         else
           echo "Failed to obtain certificates from ZeroSSL"
           exit 1
