@@ -323,7 +323,7 @@ jobs:
           echo "VALID_CERT_EXISTS=false" >> $GITHUB_ENV
         fi
 
-    - name: Try ZeroSSL if Let's Encrypt Fails
+    - name: Try OpenCA Certificate Generation
       if: ${{ env.VALID_CERT_EXISTS != 'true' }}
       run: |
         ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
@@ -345,16 +345,14 @@ jobs:
         echo "Current directory structure:"
         ls -la /etc/letsencrypt/
         
-        # Try ZeroSSL with HTTP challenge and verbose output
+        # Try OpenCA with HTTP challenge and verbose output
         certbot certonly --standalone \
           --preferred-challenges http \
           -d ${{ inputs.domain }} \
           --non-interactive \
           --agree-tos \
           -m admin@ayurvahi.com \
-          --server https://acme.zerossl.com/v2/DV90 \
-          --eab-kid "${{ secrets.ZEROSSL_KID }}" \
-          --eab-hmac-key "${{ secrets.ZEROSSL_HMAC_KEY }}" \
+          --server https://api.buypass.com/acme/directory \
           --cert-name ${{ inputs.domain }} \
           -v
         
@@ -368,7 +366,7 @@ jobs:
         ls -la /etc/letsencrypt/archive/ || true
         
         if [ \$CERT_EXIT_CODE -eq 0 ]; then
-          echo "Successfully obtained certificates from ZeroSSL"
+          echo "Successfully obtained certificates from OpenCA"
           
           # Find the actual certificate files
           CERT_DIR=\$(find /etc/letsencrypt/live -type l -name fullchain.pem | head -n 1 | xargs dirname)
@@ -401,7 +399,7 @@ jobs:
             exit 1
           fi
         else
-          echo "Failed to obtain certificates from ZeroSSL"
+          echo "Failed to obtain certificates from OpenCA"
           cat /var/log/letsencrypt/letsencrypt.log
           exit 1
         fi
