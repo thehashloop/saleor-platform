@@ -116,7 +116,7 @@ jobs:
         
         # Update docker-compose.yml with domain name
         sed -i "s#DASHBOARD_URL=http://localhost:9000/#DASHBOARD_URL=https://${{ inputs.domain }}/dashboard/#" docker-compose.yml
-        sed -i "s/ALLOWED_HOSTS=localhost,api/ALLOWED_HOSTS=localhost,api,${{ inputs.domain }}/" docker-compose.yml
+        sed -i "s/ALLOWED_HOSTS=localhost,api/ALLOWED_HOSTS=localhost,api,${{ inputs.domain }},${{ inputs.reserved_ip }}/" docker-compose.yml
         sed -i "s#API_URL=http://localhost:8000/#API_URL=https://${{ inputs.domain }}/#" docker-compose.yml
         sed -i "s#NEXT_PUBLIC_SALEOR_API_URL=http://localhost:8000/#NEXT_PUBLIC_SALEOR_API_URL=https://${{ inputs.domain }}/#" docker-compose.yml
         sed -i "s#NEXT_PUBLIC_STOREFRONT_URL=http://localhost:3000#NEXT_PUBLIC_STOREFRONT_URL=https://${{ inputs.domain }}#" docker-compose.yml
