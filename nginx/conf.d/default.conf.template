@@ -42,7 +42,7 @@ server {
     }
 
     # Dashboard
-    location /dashboard {
+    location /admin/dashboard {
         set $upstream_dashboard dashboard;
         proxy_pass http://$upstream_dashboard:9000;
         proxy_set_header Host $host;
