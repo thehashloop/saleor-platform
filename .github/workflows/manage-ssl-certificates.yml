@@ -85,14 +85,17 @@ jobs:
           echo "No existing certificates found in Spaces"
         fi
 
-    - name: Get Let's Encrypt Certificate
+    - name: Get OpenCA Certificate
       if: success() || failure()
       run: |
         # Install certbot
         sudo apt-get update
         sudo apt-get install -y certbot
         
-        # Try to get certificate from Let's Encrypt
+        # Stop any processes using port 80
+        sudo lsof -ti:80 | xargs -r sudo kill -9
+        
+        # Try to get certificate from OpenCA
         sudo certbot certonly \
           --standalone \
           --preferred-challenges http \
@@ -101,7 +104,7 @@ jobs:
           --agree-tos \
           -m admin@ayurvahi.com \
           --cert-name ${{ inputs.domain }} \
-          --server https://acme-v02.api.letsencrypt.org/directory \
+          --server https://api.buypass.com/acme/directory \
           -v
         
         if [ $? -ne 0 ]; then
