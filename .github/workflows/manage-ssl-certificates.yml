@@ -85,32 +85,18 @@ jobs:
           echo "No existing certificates found in Spaces"
         fi
 
-    - name: Get Let's Encrypt Wildcard Certificate
+    - name: Get Let's Encrypt Certificate
       if: success() || failure()
       run: |
-        # Install certbot and DNS plugin
+        # Install certbot
         sudo apt-get update
-        sudo apt-get install -y certbot python3-pip
-        sudo pip3 install certbot-dns-digitalocean
+        sudo apt-get install -y certbot
         
-        # Configure DNS plugin with debugging
-        mkdir -p ~/.secrets/
-        echo "dns_digitalocean_token = ${{ secrets.DO_TOKEN }}" > ~/.secrets/digitalocean.ini
-        chmod 600 ~/.secrets/digitalocean.ini
-        
-        # Debug DNS records
-        echo "Checking current DNS records..."
-        curl -X GET \
-          -H "Authorization: Bearer ${{ secrets.DO_TOKEN }}" \
-          "https://api.digitalocean.com/v2/domains/${{ inputs.domain }}/records"
-        
-        # Try to get wildcard certificate from Let's Encrypt
+        # Try to get certificate from Let's Encrypt
         sudo certbot certonly \
-          --dns-digitalocean \
-          --dns-digitalocean-credentials ~/.secrets/digitalocean.ini \
-          --dns-digitalocean-propagation-seconds 90 \
+          --standalone \
+          --preferred-challenges http \
           -d "${{ inputs.domain }}" \
-          -d "*.${{ inputs.domain }}" \
           --non-interactive \
           --agree-tos \
           -m admin@ayurvahi.com \
