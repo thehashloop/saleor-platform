@@ -14,23 +14,29 @@ server {
     ssl_certificate /etc/nginx/ssl/fullchain.pem;
     ssl_certificate_key /etc/nginx/ssl/privkey.pem;
 
+    # Add DNS resolver for Docker
+    resolver 127.0.0.11 valid=30s;
+    
     # Dashboard
     location /dashboard {
-        proxy_pass http://dashboard:80;
+        set $upstream_dashboard dashboard;
+        proxy_pass http://$upstream_dashboard:80;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
     }
 
     # API
     location /graphql {
-        proxy_pass http://api:8000;
+        set $upstream_api api;
+        proxy_pass http://$upstream_api:8000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
     }
 
     # Storefront
     location / {
-        proxy_pass http://storefront:3000;
+        set $upstream_storefront storefront;
+        proxy_pass http://$upstream_storefront:3000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
     }
