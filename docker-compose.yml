@@ -30,6 +30,8 @@ services:
     ports:
       - 9000:80
     restart: unless-stopped
+    networks:
+      - saleor-backend-tier
     environment:
       - API_URL=http://localhost:8000/graphql/
   
@@ -38,6 +40,8 @@ services:
     ports:
       - 3000:3000
     restart: unless-stopped
+    networks:
+      - saleor-backend-tier
     environment:
       - NEXT_PUBLIC_SALEOR_API_URL=http://localhost:8000/graphql/
       - NEXT_PUBLIC_STOREFRONT_URL=http://localhost:3000
