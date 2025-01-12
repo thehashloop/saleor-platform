@@ -13,9 +13,6 @@ on:
         description: 'Region of the DigitalOcean Space'
         required: true
         default: 'blr1'
-      do_token:
-        description: 'DigitalOcean API Token'
-        required: true
 
 jobs:
   manage-certificates:
@@ -73,7 +70,7 @@ jobs:
 
         # Configure DNS plugin
         mkdir -p ~/.secrets/
-        echo "dns_digitalocean_token = ${{ inputs.do_token }}" > ~/.secrets/digitalocean.ini
+        echo "dns_digitalocean_token = ${{ secrets.DO_TOKEN }}" > ~/.secrets/digitalocean.ini
         chmod 600 ~/.secrets/digitalocean.ini
         
         # Try to get wildcard certificate from Let's Encrypt
