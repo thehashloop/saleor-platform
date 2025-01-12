@@ -461,18 +461,22 @@ jobs:
         ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
         cd ~/app
         
-        # Check container status
+        # Install net-tools for netstat
+        apt-get update && apt-get install -y net-tools
+        
+        # Check container status one at a time to avoid memory issues
+        echo "Checking container status:"
         docker compose ps
         
-        # Check nginx logs
-        docker compose logs nginx
+        echo "Checking nginx logs:"
+        docker compose logs --tail=50 nginx
         
-        # Check if ports are actually bound
-        netstat -tulpn | grep -E '::443'
+        echo "Checking if ports are bound:"
+        netstat -tulpn | grep -E ':443|:80'
         
-        # Check nginx configuration
-        docker compose exec nginx nginx -t
+        echo "Checking nginx configuration:"
+        docker compose exec nginx nginx -t || true
         
-        # Check SSL certificate permissions
-        ls -l nginx/ssl/
+        echo "Checking SSL certificate permissions:"
+        ls -l nginx/ssl/ || echo "SSL directory not found"
         EOF
