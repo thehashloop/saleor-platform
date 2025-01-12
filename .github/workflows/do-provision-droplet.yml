@@ -267,26 +267,25 @@ jobs:
         ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
         cd ~/app
         
-        # Install doctl
-        cd /tmp
-        curl -sL https://github.com/digitalocean/doctl/releases/download/v1.101.0/doctl-1.101.0-linux-amd64.tar.gz | tar -xzv
-        mv doctl /usr/local/bin
-        doctl auth init --access-token ${{ secrets.DO_TOKEN }}
+        # Install s3cmd for Spaces access
+        apt-get update && apt-get install -y s3cmd
         
-        # Install Spaces plugin
-        mkdir -p ~/.config/doctl/plugins
-        curl -sL https://github.com/digitalocean/doctl-spaces/releases/download/v0.2.0/doctl-spaces-linux-amd64.tar.gz | tar -xzv -C ~/.config/doctl/plugins
-        chmod +x ~/.config/doctl/plugins/doctl-spaces
+        # Configure s3cmd for Spaces
+        cat > ~/.s3cfg << EOL
+        [default]
+        access_key = ${{ secrets.DO_SPACES_KEY }}
+        secret_key = ${{ secrets.DO_SPACES_SECRET }}
+        host_base = ${{ inputs.spaces_region }}.digitaloceanspaces.com
+        host_bucket = %(bucket)s.${{ inputs.spaces_region }}.digitaloceanspaces.com
+        use_https = True
+        EOL
         
         # Create temp directory for certificates
         mkdir -p .certificates
         
-        # Try to download existing certificates from Spaces using doctl
-        if doctl spaces objects get ${{ inputs.spaces_name }}/certificates/${{ inputs.domain }}/fullchain.pem \
-          --region ${{ inputs.spaces_region }} > .certificates/fullchain.pem; then
-          
-          doctl spaces objects get ${{ inputs.spaces_name }}/certificates/${{ inputs.domain }}/privkey.pem \
-            --region ${{ inputs.spaces_region }} > .certificates/privkey.pem
+        # Try to download existing certificates using s3cmd
+        if s3cmd get s3://${{ inputs.spaces_name }}/certificates/${{ inputs.domain }}/fullchain.pem .certificates/fullchain.pem; then
+          s3cmd get s3://${{ inputs.spaces_name }}/certificates/${{ inputs.domain }}/privkey.pem .certificates/privkey.pem
           
           # Check if certificates are valid
           if openssl x509 -checkend 2592000 -noout -in .certificates/fullchain.pem; then
@@ -294,14 +293,14 @@ jobs:
             mkdir -p /etc/letsencrypt/live/${{ inputs.domain }}
             cp .certificates/fullchain.pem /etc/letsencrypt/live/${{ inputs.domain }}/
             cp .certificates/privkey.pem /etc/letsencrypt/live/${{ inputs.domain }}/
-            echo "VALID_CERT_EXISTS=true" >> $GITHUB_ENV
+            echo "VALID_CERT_EXISTS=true" >> \$GITHUB_ENV
           else
             echo "Certificates exist but are expired"
-            echo "VALID_CERT_EXISTS=false" >> $GITHUB_ENV
+            echo "VALID_CERT_EXISTS=false" >> \$GITHUB_ENV
           fi
         else
           echo "No existing certificates found in Spaces"
-          echo "VALID_CERT_EXISTS=false" >> $GITHUB_ENV
+          echo "VALID_CERT_EXISTS=false" >> \$GITHUB_ENV
         fi
         EOF
 
