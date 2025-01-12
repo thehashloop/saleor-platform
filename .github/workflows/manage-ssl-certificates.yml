@@ -65,32 +65,39 @@ jobs:
       run: |
         # Install certbot and DNS plugin
         sudo apt-get update
-        sudo apt-get install -y certbot
+        sudo apt-get install -y certbot python3-pip
         sudo pip3 install certbot-dns-digitalocean
-
-        # Configure DNS plugin
+        
+        # Configure DNS plugin with debugging
         mkdir -p ~/.secrets/
         echo "dns_digitalocean_token = ${{ secrets.DO_TOKEN }}" > ~/.secrets/digitalocean.ini
         chmod 600 ~/.secrets/digitalocean.ini
+        
+        # Debug DNS records
+        echo "Checking current DNS records..."
+        curl -X GET \
+          -H "Authorization: Bearer ${{ secrets.DO_TOKEN }}" \
+          "https://api.digitalocean.com/v2/domains/${{ inputs.domain }}/records"
         
         # Try to get wildcard certificate from Let's Encrypt
         sudo certbot certonly \
           --dns-digitalocean \
           --dns-digitalocean-credentials ~/.secrets/digitalocean.ini \
-          --dns-digitalocean-propagation-seconds 60 \
+          --dns-digitalocean-propagation-seconds 90 \
           -d "${{ inputs.domain }}" \
           -d "*.${{ inputs.domain }}" \
           --non-interactive \
           --agree-tos \
           -m admin@ayurvahi.com \
           --cert-name ${{ inputs.domain }} \
+          --server https://acme-v02.api.letsencrypt.org/directory \
           -v
         
-        # Show debug info after certificate request
-        echo "Directory structure after certbot:"
-        sudo ls -la /etc/letsencrypt/
-        sudo ls -la /etc/letsencrypt/live/ || true
-        sudo ls -la /etc/letsencrypt/archive/ || true
+        if [ $? -ne 0 ]; then
+          echo "Certificate request failed. Checking logs..."
+          sudo cat /var/log/letsencrypt/letsencrypt.log
+          exit 1
+        fi
 
     - name: Upload Certificates to Spaces
       if: success()
