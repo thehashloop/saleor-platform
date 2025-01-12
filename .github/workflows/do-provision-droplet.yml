@@ -273,6 +273,11 @@ jobs:
         mv doctl /usr/local/bin
         doctl auth init --access-token ${{ secrets.DO_TOKEN }}
         
+        # Install Spaces plugin
+        mkdir -p ~/.config/doctl/plugins
+        curl -sL https://github.com/digitalocean/doctl-spaces/releases/download/v0.2.0/doctl-spaces-linux-amd64.tar.gz | tar -xzv -C ~/.config/doctl/plugins
+        chmod +x ~/.config/doctl/plugins/doctl-spaces
+        
         # Create temp directory for certificates
         mkdir -p .certificates
         
