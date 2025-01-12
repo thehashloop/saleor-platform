@@ -267,6 +267,12 @@ jobs:
         ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
         cd ~/app
         
+        # Install doctl
+        cd /tmp
+        curl -sL https://github.com/digitalocean/doctl/releases/download/v1.101.0/doctl-1.101.0-linux-amd64.tar.gz | tar -xzv
+        mv doctl /usr/local/bin
+        doctl auth init --access-token ${{ secrets.DO_TOKEN }}
+        
         # Create temp directory for certificates
         mkdir -p .certificates
         
