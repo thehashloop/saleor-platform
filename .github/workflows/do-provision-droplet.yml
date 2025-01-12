@@ -264,7 +264,10 @@ jobs:
 
     - name: Check Existing Certificates in Spaces
       run: |
-        ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
+        # Create a temporary file to store the certificate status
+        echo "VALID_CERT_EXISTS=false" > cert_status.txt
+        
+        ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << 'EOF'
         cd ~/app
         
         # Install s3cmd for Spaces access
@@ -299,16 +302,26 @@ jobs:
             mkdir -p /etc/letsencrypt/live/${{ inputs.domain }}
             cp .certificates/fullchain.pem /etc/letsencrypt/live/${{ inputs.domain }}/
             cp .certificates/privkey.pem /etc/letsencrypt/live/${{ inputs.domain }}/
-            echo "VALID_CERT_EXISTS=true" >> \$GITHUB_ENV
+            echo "true" > /tmp/cert_valid
           else
             echo "Certificates exist but are expired"
-            echo "VALID_CERT_EXISTS=false" >> \$GITHUB_ENV
+            echo "false" > /tmp/cert_valid
           fi
         else
           echo "No existing certificates found in Spaces"
-          echo "VALID_CERT_EXISTS=false" >> \$GITHUB_ENV
+          echo "false" > /tmp/cert_valid
         fi
         EOF
+        
+        # Get the certificate status from the remote machine
+        scp -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }}:/tmp/cert_valid cert_valid || echo "false" > cert_valid
+        
+        # Set the environment variable in GitHub Actions
+        if [ "$(cat cert_valid)" == "true" ]; then
+          echo "VALID_CERT_EXISTS=true" >> $GITHUB_ENV
+        else
+          echo "VALID_CERT_EXISTS=false" >> $GITHUB_ENV
+        fi
 
     - name: Try ZeroSSL if Let's Encrypt Fails
       if: ${{ env.VALID_CERT_EXISTS != 'true' }}
