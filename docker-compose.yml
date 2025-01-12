@@ -34,6 +34,7 @@ services:
       - saleor-backend-tier
     environment:
       - API_URL=http://localhost:8000/graphql/
+      - APP_MOUNT_URI=/admin/dashboard/
   
   storefront:
     image: ghcr.io/thehashloop/storefront:latest
