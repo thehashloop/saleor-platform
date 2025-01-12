@@ -329,33 +329,41 @@ jobs:
         ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
         cd ~/app
         
-        # Install certbot-dns-digitalocean plugin
+        # Install pip3 and certbot plugin
+        apt-get update
+        apt-get install -y python3-pip
         pip3 install certbot-dns-digitalocean
         
-        # Try ZeroSSL with DNS challenge
-        if ! certbot certonly --standalone \
+        # Stop any services using port 80
+        systemctl stop nginx || true
+        docker compose down || true
+        
+        # Try ZeroSSL with HTTP challenge
+        certbot certonly --standalone \
           --preferred-challenges http \
           -d ${{ inputs.domain }} \
           --non-interactive \
           --agree-tos \
           -m admin@ayurvahi.com \
           --server https://acme.zerossl.com/v2/DV90 \
-          --eab-kid ${{ secrets.ZEROSSL_KID }} \
-          --eab-hmac-key ${{ secrets.ZEROSSL_HMAC_KEY }}; then
+          --eab-kid "${{ secrets.ZEROSSL_KID }}" \
+          --eab-hmac-key "${{ secrets.ZEROSSL_HMAC_KEY }}"
+        
+        if [ $? -eq 0 ]; then
+          echo "Successfully obtained certificates from ZeroSSL"
+          
+          # Upload new certificates to Spaces
+          s3cmd put /etc/letsencrypt/live/${{ inputs.domain }}/fullchain.pem \
+            s3://${{ inputs.spaces_name }}/certificates/${{ inputs.domain }}/fullchain.pem
+          
+          s3cmd put /etc/letsencrypt/live/${{ inputs.domain }}/privkey.pem \
+            s3://${{ inputs.spaces_name }}/certificates/${{ inputs.domain }}/privkey.pem
+          
+          echo "Certificates uploaded to Spaces"
+        else
           echo "Failed to obtain certificates from ZeroSSL"
           exit 1
         fi
-        
-        # Upload new certificates to Spaces using doctl
-        doctl spaces objects upload ${{ inputs.spaces_name }} \
-          --region ${{ inputs.spaces_region }} \
-          /etc/letsencrypt/live/${{ inputs.domain }}/fullchain.pem \
-          --destination certificates/${{ inputs.domain }}/fullchain.pem
-
-        doctl spaces objects upload ${{ inputs.spaces_name }} \
-          --region ${{ inputs.spaces_region }} \
-          /etc/letsencrypt/live/${{ inputs.domain }}/privkey.pem \
-          --destination certificates/${{ inputs.domain }}/privkey.pem
         EOF
 
     - name: Configure SSL for Nginx
