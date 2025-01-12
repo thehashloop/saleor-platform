@@ -280,11 +280,17 @@ jobs:
         use_https = True
         EOL
         
+        # Create bucket if it doesn't exist
+        if ! s3cmd ls s3://${{ inputs.spaces_name }}; then
+          echo "Creating bucket ${{ inputs.spaces_name }}"
+          s3cmd mb s3://${{ inputs.spaces_name }}
+        fi
+        
         # Create temp directory for certificates
         mkdir -p .certificates
         
         # Try to download existing certificates using s3cmd
-        if s3cmd get s3://${{ inputs.spaces_name }}/certificates/${{ inputs.domain }}/fullchain.pem .certificates/fullchain.pem; then
+        if s3cmd get s3://${{ inputs.spaces_name }}/certificates/${{ inputs.domain }}/fullchain.pem .certificates/fullchain.pem 2>/dev/null; then
           s3cmd get s3://${{ inputs.spaces_name }}/certificates/${{ inputs.domain }}/privkey.pem .certificates/privkey.pem
           
           # Check if certificates are valid
