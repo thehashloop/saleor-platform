@@ -47,6 +47,9 @@ services:
     environment:
       - NEXT_PUBLIC_SALEOR_API_URL=http://localhost:8000/graphql/
       - NEXT_PUBLIC_STOREFRONT_URL=http://localhost:3000
+      - TITLE= Ayurvedic Products Store | Ayurvahi
+      - DESCRIPTION= Ayurvahi is a platform for Ayurvedic products and services.
+      - STORE_NAME=Ayurvahi
 
   db:
     image: library/postgres:15-alpine
