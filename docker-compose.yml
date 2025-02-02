@@ -1,5 +1,3 @@
-version: "3.4"
-
 services:
   api:
     image: ghcr.io/saleor/saleor:3.20
@@ -11,7 +9,6 @@ services:
     stdin_open: true
     tty: true
     depends_on:
-      - db
       - redis
       - jaeger
     volumes:
@@ -50,20 +47,6 @@ services:
       - TITLE= Ayurvedic Products Store | Ayurvahi
       - DESCRIPTION= Ayurvahi is a platform for Ayurvedic products and services.
       - STORE_NAME=Ayurvahi
-
-  db:
-    image: library/postgres:15-alpine
-    ports:
-      - 5432:5432
-    restart: unless-stopped
-    networks:
-      - saleor-backend-tier
-    volumes:
-      - saleor-db:/var/lib/postgresql/data
-      - ./replica_user.sql:/docker-entrypoint-initdb.d/replica_user.sql
-    environment:
-      - POSTGRES_USER=saleor
-      - POSTGRES_PASSWORD=saleor
 
   redis:
     image: library/redis:7.0-alpine
