@@ -11,9 +11,8 @@ services:
     depends_on:
       - redis
       - jaeger
-    volumes:
-      # shared volume between worker and api for media
-      - saleor-media:/app/media
+    # volumes:
+    #   - saleor-media:/app/media
     env_file:
       - common.env
       - backend.env
@@ -70,9 +69,8 @@ services:
     depends_on:
       - redis
       - mailpit
-    volumes:
-      # shared volume between worker and api for media
-      - saleor-media:/app/media
+    # volumes:
+    #   - saleor-media:/app/media
 
   jaeger:
     image: jaegertracing/all-in-one
@@ -122,7 +120,7 @@ volumes:
     driver: local
   saleor-redis:
     driver: local
-  saleor-media:
+  # saleor-media:
 
 networks:
   saleor-backend-tier:

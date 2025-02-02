@@ -131,6 +131,8 @@ jobs:
         sed -i "s#MEDIA_URL=http://localhost:8000/media/#MEDIA_URL=https://${{ inputs.domain }}/media/#" backend.env
         sed -i "s/ALLOWED_CLIENT_HOSTS=localhost/ALLOWED_CLIENT_HOSTS=localhost,${{ inputs.domain }}/" backend.env
         sed -i "s#DATABASE_URL=#DATABASE_URL=${{ inputs.db_url }}#" backend.env
+        sed -i "s/AWS_ACCESS_KEY_ID=your_spaces_access_key/AWS_ACCESS_KEY_ID=${{ secrets.DO_SPACES_KEY }}/" backend.env
+        sed -i "s/AWS_SECRET_ACCESS_KEY=your_spaces_secret/AWS_SECRET_ACCESS_KEY=${{ secrets.DO_SPACES_SECRET }}/" backend.env
         
         # Set DOMAIN environment variable for nginx template
         echo "DOMAIN=${{ inputs.domain }}" > .env
