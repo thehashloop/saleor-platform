@@ -46,8 +46,12 @@ services:
       - .:/app
     working_dir: /app
     command: sh -c "apk add --no-cache bash && chmod +x fetch-env.sh && ./fetch-env.sh"
-    env_file:
-      - spaces.env
+    environment:
+      - DO_SPACES_KEY=${DO_SPACES_KEY}
+      - DO_SPACES_SECRET=${DO_SPACES_SECRET}
+      - DO_SPACES_NAME=${DO_SPACES_NAME}
+      - DO_SPACES_REGION=${DO_SPACES_REGION}
+      - ENVIRONMENT=${ENVIRONMENT}
 
   redis:
     image: library/redis:7.0-alpine
