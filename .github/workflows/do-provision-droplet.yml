@@ -72,22 +72,49 @@ jobs:
         sudo -E ./fetch-env.sh
         source deployment.env
         
-        # Verify SSH key
-        echo "Checking SSH key..."
-        SSH_KEY_ID=$(doctl compute ssh-key list --format ID --no-header)
-        echo "SSH key verification completed"
+        # Check if droplet already exists
+        echo "Checking for existing droplet..."
+        EXISTING_DROPLET_ID=$(doctl compute droplet list --format ID,Name --no-header | grep "my-droplet" | awk '{print $1}')
         
-        # Create droplet
-        echo "Creating droplet..."
-        DROPLET_ID=$(doctl compute droplet create my-droplet \
-          --region blr1 \
-          --image docker-20-04 \
-          --size s-2vcpu-4gb \
-          --ssh-keys ${SSH_KEY_ID} \
-          --enable-monitoring \
-          --output json | jq -r '.[0].id')
+        if [ ! -z "$EXISTING_DROPLET_ID" ]; then
+          echo "Found existing droplet with ID: $EXISTING_DROPLET_ID"
+          
+          # Check if IP is already assigned
+          CURRENT_IP=$(doctl compute droplet get $EXISTING_DROPLET_ID --format PublicIPv4 --no-header)
+          if [ "$CURRENT_IP" == "$RESERVED_IP" ]; then
+            echo "Reserved IP is already assigned to the droplet"
+            DROPLET_ID=$EXISTING_DROPLET_ID
+          else
+            echo "Destroying existing droplet..."
+            doctl compute droplet delete $EXISTING_DROPLET_ID --force
+            
+            echo "Creating new droplet..."
+            DROPLET_ID=$(doctl compute droplet create my-droplet \
+              --region blr1 \
+              --image docker-20-04 \
+              --size s-2vcpu-4gb \
+              --ssh-keys ${SSH_KEY_ID} \
+              --enable-monitoring \
+              --output json | jq -r '.[0].id')
+          fi
+        else
+          # Verify SSH key
+          echo "Checking SSH key..."
+          SSH_KEY_ID=$(doctl compute ssh-key list --format ID --no-header)
+          echo "SSH key verification completed"
+          
+          # Create new droplet
+          echo "Creating new droplet..."
+          DROPLET_ID=$(doctl compute droplet create my-droplet \
+            --region blr1 \
+            --image docker-20-04 \
+            --size s-2vcpu-4gb \
+            --ssh-keys ${SSH_KEY_ID} \
+            --enable-monitoring \
+            --output json | jq -r '.[0].id')
+        fi
         
-        echo "Droplet creation completed"
+        echo "Droplet ID: $DROPLET_ID"
         
         # Wait for droplet to be active
         echo "Waiting for droplet to become active..."
@@ -96,12 +123,21 @@ jobs:
           sleep 10
         done
         
-        # Assign the reserved IP
-        echo "Assigning reserved IP..."
-        doctl compute floating-ip-action assign $RESERVED_IP $DROPLET_ID
+        # Check current IP assignment
+        echo "Checking current IP assignment..."
+        CURRENT_IP=$(doctl compute floating-ip get $RESERVED_IP --format Droplet --no-header)
+        
+        if [ "$CURRENT_IP" != "$DROPLET_ID" ]; then
+          echo "Assigning reserved IP..."
+          doctl compute floating-ip-action assign $RESERVED_IP $DROPLET_ID
+        else
+          echo "Reserved IP is already assigned to the correct droplet"
+        fi
         
         # Set the IP in environment
         echo "DROPLET_IP=$RESERVED_IP" >> $GITHUB_ENV
+        
+        echo "Droplet setup completed"
 
     - name: Wait for Droplet to Become Active
       run: |
