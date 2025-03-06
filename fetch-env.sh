@@ -96,6 +96,17 @@ done
 echo "Contents of .env-files directory after download:"
 ls -la .env-files/
 
+# Clean up environment files (remove carriage returns and trailing whitespace)
+echo "Cleaning up environment files..."
+for file in .env-files/*; do
+    if [ -f "$file" ]; then
+        # Remove carriage returns and trailing whitespace
+        sed -i 's/\r$//' "$file"
+        sed -i 's/[[:space:]]*$//' "$file"
+        echo "Cleaned up $(basename "$file")"
+    fi
+done
+
 # Move files to their correct locations
 echo "Moving environment files to their locations..."
 for file in .env-files/*; do
