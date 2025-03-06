@@ -55,9 +55,21 @@ jobs:
       run: |
         echo "Starting droplet creation..."
         
-        # Fetch and source deployment config first
+        # Debug: Show current directory and permissions
+        pwd
+        ls -la
+        
+        # Make script executable
         chmod +x fetch-env.sh
-        ./fetch-env.sh
+        
+        # Install s3cmd if needed
+        if ! command -v s3cmd &> /dev/null; then
+          sudo apt-get update
+          sudo apt-get install -y s3cmd
+        fi
+        
+        # Fetch and source deployment config
+        sudo -E ./fetch-env.sh
         source deployment.env
         
         # Verify SSH key
