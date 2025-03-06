@@ -62,6 +62,10 @@ s3cmd ls
 echo "Checking bucket ${DO_SPACES_NAME}:"
 s3cmd ls s3://${DO_SPACES_NAME}/
 
+# Debug: List all contents of the bucket recursively
+echo "Listing all contents of bucket ${DO_SPACES_NAME}:"
+s3cmd ls --recursive s3://${DO_SPACES_NAME}/
+
 # Check if environment directory exists in Spaces
 echo "Checking for environment directory: ${ENV_FILES_PATH}"
 if ! s3cmd ls s3://${DO_SPACES_NAME}/${ENV_FILES_PATH}/ &>/dev/null; then
@@ -71,9 +75,17 @@ if ! s3cmd ls s3://${DO_SPACES_NAME}/${ENV_FILES_PATH}/ &>/dev/null; then
     exit 1
 fi
 
+# Debug: List contents of environment directory
+echo "Contents of ${ENV_FILES_PATH}:"
+s3cmd ls s3://${DO_SPACES_NAME}/${ENV_FILES_PATH}/
+
 # Download environment files from Spaces
 echo "Downloading environment files from Spaces..."
 s3cmd get --recursive s3://${DO_SPACES_NAME}/${ENV_FILES_PATH}/* .env-files/
+
+# Debug: Show downloaded files
+echo "Contents of .env-files directory after download:"
+ls -la .env-files/
 
 # Check if required files exist
 required_files=("backend.env" "frontend.env" "common.env" "deployment.env")
