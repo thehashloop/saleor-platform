@@ -81,22 +81,20 @@ s3cmd ls s3://${DO_SPACES_NAME}/${ENV_FILES_PATH}/
 
 # Download environment files from Spaces
 echo "Downloading environment files from Spaces..."
-s3cmd get --recursive s3://${DO_SPACES_NAME}/${ENV_FILES_PATH}/* .env-files/
+required_files=("backend.env" "frontend.env" "common.env" "deployment.env")
+for file in "${required_files[@]}"; do
+    echo "Downloading ${file}..."
+    s3cmd get s3://${DO_SPACES_NAME}/${ENV_FILES_PATH}/${file} .env-files/${file}
+    if [ ! -f ".env-files/${file}" ]; then
+        echo "Error: Failed to download ${file}"
+        exit 1
+    fi
+    echo "Successfully downloaded ${file}"
+done
 
 # Debug: Show downloaded files
 echo "Contents of .env-files directory after download:"
 ls -la .env-files/
-
-# Check if required files exist
-required_files=("backend.env" "frontend.env" "common.env" "deployment.env")
-for file in "${required_files[@]}"; do
-    if [ ! -f ".env-files/${file}" ]; then
-        echo "Error: Required file '${file}' not found in ${ENV_FILES_PATH}"
-        echo "Contents of .env-files directory:"
-        ls -la .env-files/
-        exit 1
-    fi
-done
 
 # Move files to their correct locations
 echo "Moving environment files to their locations..."
