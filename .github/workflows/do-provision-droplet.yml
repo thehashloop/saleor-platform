@@ -3,6 +3,15 @@ name: Provision DigitalOcean Droplet
 on:
   workflow_dispatch:
     inputs:
+      environment:
+        description: 'Environment to deploy (dev/staging/prod)'
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+        default: 'dev'
       populate_db:
         description: 'Populate database with sample data'
         required: true
@@ -33,7 +42,7 @@ on:
         description: 'DigitalOcean Spaces bucket name'
         required: true
         type: string
-        default: 'ayurvahi-certs'
+        default: 'ayurvahi-config'
       spaces_region:
         description: 'DigitalOcean Spaces region'
         required: true
@@ -48,6 +57,13 @@ on:
 jobs:
   provision:
     runs-on: ubuntu-latest
+    
+    env:
+      ENVIRONMENT: ${{ inputs.environment }}
+      DO_SPACES_KEY: ${{ secrets.DO_SPACES_KEY }}
+      DO_SPACES_SECRET: ${{ secrets.DO_SPACES_SECRET }}
+      DO_SPACES_NAME: ${{ inputs.spaces_name }}
+      DO_SPACES_REGION: ${{ inputs.spaces_region }}
 
     steps:
     - name: Checkout Code
@@ -69,6 +85,9 @@ jobs:
         DIGITALOCEAN_ACCESS_TOKEN: ${{ secrets.DO_TOKEN }}
       run: |
         echo "Starting droplet creation..."
+        
+        # Source deployment config
+        source .env-files/deployment.env
         
         # Verify SSH key
         echo "Checking SSH key..."
@@ -96,10 +115,10 @@ jobs:
         
         # Assign the reserved IP
         echo "Assigning reserved IP..."
-        doctl compute floating-ip-action assign ${{ inputs.reserved_ip }} $DROPLET_ID
+        doctl compute floating-ip-action assign $RESERVED_IP $DROPLET_ID
         
         # Set the IP in environment
-        echo "DROPLET_IP=${{ inputs.reserved_ip }}" >> $GITHUB_ENV
+        echo "DROPLET_IP=$RESERVED_IP" >> $GITHUB_ENV
 
     - name: Wait for Droplet to Become Active
       run: |
@@ -114,104 +133,69 @@ jobs:
       run: |
         scp -o StrictHostKeyChecking=no -r . root@${{ env.DROPLET_IP }}:~/app
 
-    - name: Update Configuration Files
+    - name: Configure Environment and Start Services
       run: |
         ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
         cd ~/app
         
-        # Update configurations
-        echo "Updating docker-compose.yml..."
-        sed -i "s#DASHBOARD_URL=http://localhost:9000/#DASHBOARD_URL=https://${{ inputs.domain }}/dashboard/#" docker-compose.yml
-        sed -i "s/ALLOWED_HOSTS=localhost,api/ALLOWED_HOSTS=localhost,api,${{ inputs.domain }},${{ inputs.reserved_ip }}/" docker-compose.yml
-        sed -i "s#API_URL=http://localhost:8000/#API_URL=https://${{ inputs.domain }}/#" docker-compose.yml
-        sed -i "s#NEXT_PUBLIC_SALEOR_API_URL=http://localhost:8000/#NEXT_PUBLIC_SALEOR_API_URL=https://${{ inputs.domain }}/#" docker-compose.yml
-        sed -i "s#NEXT_PUBLIC_STOREFRONT_URL=http://localhost:3000#NEXT_PUBLIC_STOREFRONT_URL=https://${{ inputs.domain }}#" docker-compose.yml
+        # Export environment variables
+        export ENVIRONMENT="${{ inputs.environment }}"
+        export DO_SPACES_KEY="${{ secrets.DO_SPACES_KEY }}"
+        export DO_SPACES_SECRET="${{ secrets.DO_SPACES_SECRET }}"
+        export DO_SPACES_NAME="${{ inputs.spaces_name }}"
+        export DO_SPACES_REGION="${{ inputs.spaces_region }}"
         
-        echo "Updating backend.env..."
-        sed -i "s#PUBLIC_URL=http://localhost:8000#PUBLIC_URL=https://${{ inputs.domain }}#" backend.env
-        sed -i "s#MEDIA_URL=http://localhost:8000/media/#MEDIA_URL=https://${{ inputs.domain }}/media/#" backend.env
-        sed -i "s/ALLOWED_CLIENT_HOSTS=localhost/ALLOWED_CLIENT_HOSTS=localhost,${{ inputs.domain }}/" backend.env
-        sed -i "s#DATABASE_URL=#DATABASE_URL=${{ inputs.db_url }}#" backend.env
-        sed -i "s/AWS_ACCESS_KEY_ID=your_spaces_access_key/AWS_ACCESS_KEY_ID=${{ secrets.DO_SPACES_KEY }}/" backend.env
-        sed -i "s/AWS_SECRET_ACCESS_KEY=your_spaces_secret/AWS_SECRET_ACCESS_KEY=${{ secrets.DO_SPACES_SECRET }}/" backend.env
+        # Make scripts executable
+        chmod +x fetch-env.sh env-manager.sh
         
-        echo "Setting domain environment variable..."
-        echo "DOMAIN=${{ inputs.domain }}" > .env
-        
-        echo "Configuration updates completed"
-        EOF
-
-    - name: Install Docker and Docker Compose
-      run: |
-        ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << 'EOF'
-        # Check if Docker is installed and running
-        if ! command -v docker &> /dev/null || ! systemctl is-active --quiet docker; then
-          apt-get update
-          apt-get install -y docker.io docker-compose
-          systemctl start docker
-          systemctl enable docker
-        else
-          echo "Docker is already installed and running"
-        fi
-        
-        # Add user to docker group regardless
-        usermod -aG docker $USER
-        EOF
-
-    - name: Initialize Application
-      run: |
-        ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
-        cd ~/app
-        
-        # Build the application
-        docker compose build
-        
-        # Run migrations
-        docker compose run --rm api python3 manage.py migrate
-        EOF
-
-    - name: Populate Database
-      if: ${{ inputs.populate_db }}
-      run: |
-        ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
-        cd ~/app
-        
-        # Populate database with sample data
-        docker compose run --rm api python3 manage.py populatedb
-        
-        echo "Database populated with sample data"
-        EOF
-
-    - name: Create Superuser
-      if: ${{ inputs.create_superuser }}
-      run: |
-        ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
-        cd ~/app
-        
-        # Create superuser using environment variables
-        docker compose run --rm -e DJANGO_SUPERUSER_PASSWORD="${{ inputs.superuser_password }}" \
-          -e DJANGO_SUPERUSER_EMAIL="${{ inputs.superuser_email }}" \
-          api python3 manage.py createsuperuser --noinput
-        
-        echo "Superuser created successfully"
-        EOF
-
-    - name: Start Services
-      run: |
-        ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
-        cd ~/app
+        # Run environment setup
+        ./fetch-env.sh
         
         # Login to GitHub Container Registry
         echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
         
-        # Stop all services
-        docker compose down
+        # Start services with the specified environment
+        ENVIRONMENT=${{ inputs.environment }} docker compose up -d
         
-        # Start services again
-        docker compose up -d
+        echo "Application started with ${{ inputs.environment }} environment"
+        EOF
+
+    - name: Initialize Database
+      if: inputs.populate_db || inputs.create_superuser
+      run: |
+        ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
+        cd ~/app
+        source .env-files/deployment.env
         
-        # Check logs
-        docker compose logs nginx
+        # Run migrations
+        docker compose run --rm api python3 manage.py migrate
+        
+        # Populate database if requested
+        if [[ "\$POPULATE_DB" == "true" ]]; then
+          docker compose run --rm api python3 manage.py populatedb
+          echo "Database populated with sample data"
+        fi
+        
+        # Create superuser if requested
+        if [[ "\$CREATE_SUPERUSER" == "true" ]]; then
+          docker compose run --rm -e DJANGO_SUPERUSER_PASSWORD="\$SUPERUSER_PASSWORD" \
+            -e DJANGO_SUPERUSER_EMAIL="\$SUPERUSER_EMAIL" \
+            api python3 manage.py createsuperuser --noinput
+          echo "Superuser created successfully"
+        fi
+        EOF
+
+    - name: Verify Deployment
+      run: |
+        ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
+        cd ~/app
+        
+        echo "Current environment: \$(cat .env_current)"
+        echo "Container status:"
+        docker compose ps
+        
+        echo "Container logs:"
+        docker compose logs --tail=20
         EOF
 
     - name: Output Droplet IP

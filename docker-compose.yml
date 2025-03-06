@@ -11,15 +11,10 @@ services:
     depends_on:
       - redis
       - jaeger
-    # volumes:
-    #   - saleor-media:/app/media
+      - env-setup
     env_file:
       - common.env
       - backend.env
-    environment:
-      - JAEGER_AGENT_HOST=jaeger
-      - DASHBOARD_URL=http://localhost:9000/
-      - ALLOWED_HOSTS=localhost,api
 
   dashboard:
     image: ghcr.io/saleor/saleor-dashboard:latest
@@ -28,10 +23,10 @@ services:
     restart: unless-stopped
     networks:
       - saleor-backend-tier
-    environment:
-      - API_URL=http://localhost:8000/graphql/
-      - APP_MOUNT_URI=/dashboard/
-      - STATIC_URL=/dashboard/static/
+    depends_on:
+      - env-setup
+    env_file:
+      - frontend.env
   
   storefront:
     image: ghcr.io/thehashloop/storefront:latest
@@ -40,12 +35,19 @@ services:
     restart: unless-stopped
     networks:
       - saleor-backend-tier
-    environment:
-      - NEXT_PUBLIC_SALEOR_API_URL=http://localhost:8000/graphql/
-      - NEXT_PUBLIC_STOREFRONT_URL=http://localhost:3000
-      - TITLE= Ayurvedic Products Store | Ayurvahi
-      - DESCRIPTION= Ayurvahi is a platform for Ayurvedic products and services.
-      - STORE_NAME=Ayurvahi
+    depends_on:
+      - env-setup
+    env_file:
+      - frontend.env
+
+  env-setup:
+    image: alpine:latest
+    volumes:
+      - .:/app
+    working_dir: /app
+    command: sh -c "apk add --no-cache bash && chmod +x fetch-env.sh && ./fetch-env.sh"
+    env_file:
+      - spaces.env
 
   redis:
     image: library/redis:7.0-alpine
