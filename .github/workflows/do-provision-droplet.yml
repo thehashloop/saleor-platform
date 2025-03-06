@@ -12,32 +12,6 @@ on:
           - staging
           - prod
         default: 'dev'
-      populate_db:
-        description: 'Populate database with sample data'
-        required: true
-        type: boolean
-        default: false
-      create_superuser:
-        description: 'Create a superuser account'
-        required: true
-        type: boolean
-        default: false
-      superuser_email:
-        description: 'Superuser email address'
-        required: false
-        type: string
-      superuser_password:
-        description: 'Superuser password'
-        required: false
-        type: string
-      reserved_ip:
-        description: 'Reserved IP address to assign to the droplet'
-        required: true
-        type: string
-      domain:
-        description: 'Domain name to use (e.g. test.ayurvahi.com)'
-        required: true
-        type: string
       spaces_name:
         description: 'DigitalOcean Spaces bucket name'
         required: true
@@ -48,11 +22,6 @@ on:
         required: true
         type: string
         default: 'blr1'
-      db_url:
-        description: 'Database URL'
-        required: true
-        type: string
-      
 
 jobs:
   provision:
@@ -86,8 +55,10 @@ jobs:
       run: |
         echo "Starting droplet creation..."
         
-        # Source deployment config
-        source .env-files/deployment.env
+        # Fetch and source deployment config first
+        chmod +x fetch-env.sh
+        ./fetch-env.sh
+        source deployment.env
         
         # Verify SSH key
         echo "Checking SSH key..."
@@ -145,10 +116,8 @@ jobs:
         export DO_SPACES_NAME="${{ inputs.spaces_name }}"
         export DO_SPACES_REGION="${{ inputs.spaces_region }}"
         
-        # Make scripts executable
-        chmod +x fetch-env.sh env-manager.sh
-        
-        # Run environment setup
+        # Make scripts executable and fetch environment files
+        chmod +x fetch-env.sh
         ./fetch-env.sh
         
         # Login to GitHub Container Registry
@@ -161,22 +130,21 @@ jobs:
         EOF
 
     - name: Initialize Database
-      if: inputs.populate_db || inputs.create_superuser
       run: |
         ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
         cd ~/app
-        source .env-files/deployment.env
+        source deployment.env
         
         # Run migrations
         docker compose run --rm api python3 manage.py migrate
         
-        # Populate database if requested
+        # Populate database if configured
         if [[ "\$POPULATE_DB" == "true" ]]; then
           docker compose run --rm api python3 manage.py populatedb
           echo "Database populated with sample data"
         fi
         
-        # Create superuser if requested
+        # Create superuser if configured
         if [[ "\$CREATE_SUPERUSER" == "true" ]]; then
           docker compose run --rm -e DJANGO_SUPERUSER_PASSWORD="\$SUPERUSER_PASSWORD" \
             -e DJANGO_SUPERUSER_EMAIL="\$SUPERUSER_EMAIL" \
@@ -189,17 +157,16 @@ jobs:
       run: |
         ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
         cd ~/app
+        source deployment.env
         
         echo "Current environment: \$(cat .env_current)"
+        echo "Domain: \$DOMAIN"
         echo "Container status:"
         docker compose ps
         
         echo "Container logs:"
         docker compose logs --tail=20
         EOF
-
-    - name: Output Droplet IP
-      run: echo "Droplet IP is ${{ env.DROPLET_IP }}"
 
     - name: Configure Firewall
       run: |
@@ -216,251 +183,33 @@ jobs:
         ufw status
         EOF
 
-    - name: Stop Services for SSL Setup
+    - name: Configure SSL
       run: |
         ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
         cd ~/app
+        source deployment.env
         
-        echo "Stopping system nginx..."
+        # Stop services for SSL setup
         systemctl stop nginx || true
-        
-        echo "Stopping docker containers..."
         docker compose down
         
-        echo "Checking for processes using ports 80 and 443..."
-        netstat -tulpn | grep -E ':80|:443'
-        
-        echo "Killing any processes using ports 80 and 443..."
-        lsof -ti:80 | xargs -r kill -9
-        lsof -ti:443 | xargs -r kill -9
-        
-        echo "Verifying ports are free..."
-        netstat -tulpn | grep -E ':80|:443' || echo "Ports are free"
-        EOF
-
-    - name: Install Certbot
-      run: |
-        ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
-        apt-get update
-        apt-get remove -y nginx nginx-common || true
-        apt-get install -y certbot
-        EOF
-
-    - name: Check Existing Certificates in Spaces
-      run: |
-        # Create a temporary file to store the certificate status
-        echo "VALID_CERT_EXISTS=false" > cert_status.txt
-        
-        ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << 'EOF'
-        cd ~/app
-        
-        # Install s3cmd for Spaces access
-        apt-get update && apt-get install -y s3cmd
-        
-        # Configure s3cmd for Spaces
-        cat > ~/.s3cfg << EOL
-        [default]
-        access_key = ${{ secrets.DO_SPACES_KEY }}
-        secret_key = ${{ secrets.DO_SPACES_SECRET }}
-        host_base = ${{ inputs.spaces_region }}.digitaloceanspaces.com
-        host_bucket = %(bucket)s.${{ inputs.spaces_region }}.digitaloceanspaces.com
-        use_https = True
-        EOL
-        
-        # Create bucket if it doesn't exist
-        if ! s3cmd ls s3://${{ inputs.spaces_name }}; then
-          echo "Creating bucket ${{ inputs.spaces_name }}"
-          s3cmd mb s3://${{ inputs.spaces_name }}
+        # Install certbot if needed
+        if ! command -v certbot &> /dev/null; then
+          apt-get update
+          apt-get remove -y nginx nginx-common || true
+          apt-get install -y certbot
         fi
         
-        # Create temp directory for certificates
-        mkdir -p .certificates
-        
-        # Try to download existing certificates using s3cmd
-        if s3cmd get s3://${{ inputs.spaces_name }}/certificates/${{ inputs.domain }}/fullchain.pem .certificates/fullchain.pem 2>/dev/null; then
-          s3cmd get s3://${{ inputs.spaces_name }}/certificates/${{ inputs.domain }}/privkey.pem .certificates/privkey.pem
-          
-          # Check if certificates are valid
-          if openssl x509 -checkend 2592000 -noout -in .certificates/fullchain.pem; then
-            echo "Found valid certificates in Spaces"
-            mkdir -p /etc/letsencrypt/live/${{ inputs.domain }}
-            cp .certificates/fullchain.pem /etc/letsencrypt/live/${{ inputs.domain }}/
-            cp .certificates/privkey.pem /etc/letsencrypt/live/${{ inputs.domain }}/
-            echo "true" > /tmp/cert_valid
-          else
-            echo "Certificates exist but are expired"
-            echo "false" > /tmp/cert_valid
-          fi
-        else
-          echo "No existing certificates found in Spaces"
-          echo "false" > /tmp/cert_valid
-        fi
-        EOF
-        
-        # Get the certificate status from the remote machine
-        scp -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }}:/tmp/cert_valid cert_valid || echo "false" > cert_valid
-        
-        # Set the environment variable in GitHub Actions
-        if [ "$(cat cert_valid)" == "true" ]; then
-          echo "VALID_CERT_EXISTS=true" >> $GITHUB_ENV
-        else
-          echo "VALID_CERT_EXISTS=false" >> $GITHUB_ENV
-        fi
-
-    - name: Try OpenCA Certificate Generation
-      if: ${{ env.VALID_CERT_EXISTS != 'true' }}
-      run: |
-        ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
-        cd ~/app
-        
-        # Install pip3 and certbot plugin
-        apt-get update
-        apt-get install -y python3-pip
-        pip3 install certbot-dns-digitalocean
-        
-        # Stop any services using port 80
-        systemctl stop nginx || true
-        docker compose down || true
-        
-        # Create required directories
-        mkdir -p /etc/letsencrypt/live/${{ inputs.domain }}
-        
-        # Show debug info before certificate request
-        echo "Current directory structure:"
-        ls -la /etc/letsencrypt/
-        
-        # Try OpenCA with HTTP challenge and verbose output
+        # Set up SSL certificates
         certbot certonly --standalone \
           --preferred-challenges http \
-          -d ${{ inputs.domain }} \
+          -d \$DOMAIN \
           --non-interactive \
           --agree-tos \
           -m admin@ayurvahi.com \
           --server https://api.buypass.com/acme/directory \
-          --cert-name ${{ inputs.domain }} \
-          -v
+          --cert-name \$DOMAIN
         
-        CERT_EXIT_CODE=$?
-        echo "Certbot exit code: \$CERT_EXIT_CODE"
-        
-        # Show debug info after certificate request
-        echo "Directory structure after certbot:"
-        ls -la /etc/letsencrypt/
-        ls -la /etc/letsencrypt/live/ || true
-        ls -la /etc/letsencrypt/archive/ || true
-        
-        if [ \$CERT_EXIT_CODE -eq 0 ]; then
-          echo "Successfully obtained certificates from OpenCA"
-          
-          # Find the actual certificate files
-          CERT_DIR=\$(find /etc/letsencrypt/live -type l -name fullchain.pem | head -n 1 | xargs dirname)
-          echo "Found certificate directory: \$CERT_DIR"
-          
-          if [ -n "\$CERT_DIR" ] && [ -L "\$CERT_DIR/fullchain.pem" ] && [ -L "\$CERT_DIR/privkey.pem" ]; then
-            # Get the actual files from archive
-            REAL_FULLCHAIN=\$(readlink -f "\$CERT_DIR/fullchain.pem")
-            REAL_PRIVKEY=\$(readlink -f "\$CERT_DIR/privkey.pem")
-            
-            echo "Real certificate paths:"
-            echo "Fullchain: \$REAL_FULLCHAIN"
-            echo "Privkey: \$REAL_PRIVKEY"
-            
-            # Upload the actual certificate files to Spaces
-            s3cmd put "\$REAL_FULLCHAIN" \
-              "s3://${{ inputs.spaces_name }}/certificates/${{ inputs.domain }}/fullchain.pem"
-            
-            s3cmd put "\$REAL_PRIVKEY" \
-              "s3://${{ inputs.spaces_name }}/certificates/${{ inputs.domain }}/privkey.pem"
-            
-            # Copy to the expected location
-            cp "\$REAL_FULLCHAIN" "/etc/letsencrypt/live/${{ inputs.domain }}/fullchain.pem"
-            cp "\$REAL_PRIVKEY" "/etc/letsencrypt/live/${{ inputs.domain }}/privkey.pem"
-            
-            echo "Certificates copied and uploaded"
-            ls -l "/etc/letsencrypt/live/${{ inputs.domain }}/"
-          else
-            echo "Could not find certificate symlinks"
-            exit 1
-          fi
-        else
-          echo "Failed to obtain certificates from OpenCA"
-          cat /var/log/letsencrypt/letsencrypt.log
-          exit 1
-        fi
-        EOF
-
-    - name: Configure SSL for Nginx
-      run: |
-        ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
-        cd ~/app
-        
-        # Create SSL directory
-        mkdir -p nginx/ssl
-        
-        # Check if certificate exists and copy if it does
-        if [ -d "/etc/letsencrypt/live/${{ inputs.domain }}" ]; then
-          cp /etc/letsencrypt/live/${{ inputs.domain }}/fullchain.pem nginx/ssl/
-          cp /etc/letsencrypt/live/${{ inputs.domain }}/privkey.pem nginx/ssl/
-          
-          # Set proper permissions
-          chmod 644 nginx/ssl/fullchain.pem
-          chmod 644 nginx/ssl/privkey.pem
-          
-          # Verify files exist and permissions
-          ls -l nginx/ssl/
-        else
-          echo "SSL certificates not found at /etc/letsencrypt/live/${{ inputs.domain }}"
-          exit 1
-        fi
-        EOF
-
-    - name: Configure Nginx
-      run: |
-        ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
-        cd ~/app
-        
-        # Export DOMAIN variable
-        export DOMAIN=${{ inputs.domain }}
-        
-        # Create the default.conf from template
-        envsubst '\${DOMAIN}' < nginx/conf.d/default.conf.template > nginx/conf.d/default.conf
-        
-        # Verify the configuration
-        echo "Checking nginx configuration:"
-        cat nginx/conf.d/default.conf
-        
-        # Verify DOMAIN variable
-        echo "DOMAIN variable value: \$DOMAIN"
-        EOF
-
-    - name: Start Services with SSL
-      run: |
-        ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
-        cd ~/app
+        # Start services again
         docker compose up -d
-        EOF
-
-    - name: Debug Service Status
-      run: |
-        ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
-        cd ~/app
-        
-        # Install net-tools for netstat
-        apt-get update && apt-get install -y net-tools
-        
-        # Check container status one at a time to avoid memory issues
-        echo "Checking container status:"
-        docker compose ps
-        
-        echo "Checking nginx logs:"
-        docker compose logs --tail=50 nginx
-        
-        echo "Checking if ports are bound:"
-        netstat -tulpn | grep -E ':443|:80'
-        
-        echo "Checking nginx configuration:"
-        docker compose exec nginx nginx -t || true
-        
-        echo "Checking SSL certificate permissions:"
-        ls -l nginx/ssl/ || echo "SSL directory not found"
         EOF
