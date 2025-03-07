@@ -76,8 +76,17 @@ jobs:
         echo "Available SSH keys:"
         echo "$SSH_KEY_LIST"
         
-        # Extract the numeric ID using exact name match
-        SSH_KEY_ID=$(echo "$SSH_KEY_LIST" | grep -E "^${{ inputs.ssh_key_name }}[[:space:]]" | awk '{print $2}')
+        # Use a different approach for extracting the ID that handles spaces better
+        # Use a loop to properly match the exact key name
+        SSH_KEY_ID=""
+        while IFS= read -r line; do
+          KEY_NAME=$(echo "$line" | awk '{$NF=""; print $0}' | sed 's/[[:space:]]*$//')
+          KEY_ID=$(echo "$line" | awk '{print $NF}')
+          if [ "$KEY_NAME" = "${{ inputs.ssh_key_name }}" ]; then
+            SSH_KEY_ID="$KEY_ID"
+            break
+          fi
+        done <<< "$SSH_KEY_LIST"
         
         if [ -z "$SSH_KEY_ID" ]; then
           echo "::error::SSH key '${{ inputs.ssh_key_name }}' not found!"
