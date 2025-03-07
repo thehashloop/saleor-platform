@@ -1,0 +1,47 @@
+name: Provision Droplet
+
+on:
+  workflow_dispatch:
+    inputs:
+      reserved_ip:
+        description: 'Reserved IP address to assign'
+        required: true
+        type: string
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+
+    - name: Install and Authenticate doctl
+      env:
+        DIGITALOCEAN_ACCESS_TOKEN: ${{ secrets.DO_TOKEN }}
+      run: |
+        sudo snap install doctl --classic
+        doctl auth init --access-token $DIGITALOCEAN_ACCESS_TOKEN
+
+    - name: Create Droplet
+      id: create_droplet
+      run: |
+        SSH_KEY_ID=$(doctl compute ssh-key list --format ID --no-header)
+        DROPLET_ID=$(doctl compute droplet create my-droplet \
+          --region blr1 \
+          --image docker-20-04 \
+          --size s-2vcpu-4gb \
+          --ssh-keys ${SSH_KEY_ID} \
+          --enable-monitoring \
+          --output json | jq -r '.[0].id')
+        
+        # Wait for droplet activation
+        while [[ $(doctl compute droplet get $DROPLET_ID --format Status --no-header) != "active" ]]; do
+          sleep 10
+        done
+        
+        # Assign IP
+        doctl compute floating-ip-action assign ${{ inputs.reserved_ip }} $DROPLET_ID
+        echo "DROPLET_IP=${{ inputs.reserved_ip }}" >> $GITHUB_ENV
+
+    - name: Output Droplet IP
+      run: echo "Droplet IP is ${{ env.DROPLET_IP }}"
