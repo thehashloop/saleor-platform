@@ -30,79 +30,50 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v3
 
-    - name: Set up AWS CLI for Spaces
+    # AWS CLI Setup for Spaces
+    - name: Set up AWS CLI
       run: |
-        # Install AWS CLI if needed
-        if ! command -v aws &> /dev/null; then
-          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-          unzip awscliv2.zip
-          sudo ./aws/install
-        fi
-        
-        # Configure AWS CLI for DigitalOcean Spaces
+        curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+        unzip awscliv2.zip
+        sudo ./aws/install
         mkdir -p ~/.aws
         cat > ~/.aws/credentials << EOF
         [default]
         aws_access_key_id = ${{ secrets.DO_SPACES_KEY }}
         aws_secret_access_key = ${{ secrets.DO_SPACES_SECRET }}
         EOF
-        
         cat > ~/.aws/config << EOF
         [default]
-        region = us-east-1
+        region = ${{ inputs.spaces_region }}
         EOF
-        
-        echo "AWS CLI configured for Spaces access"
 
-    - name: Download Configuration File
+    # Configuration Download & Validation
+    - name: Download Configuration
       run: |
-        echo "Downloading config from s3://${{ inputs.spaces_bucket }}/${{ inputs.config_path }}"
-        mkdir -p config
         aws s3 cp s3://${{ inputs.spaces_bucket }}/${{ inputs.config_path }} config.json \
           --endpoint-url https://${{ inputs.spaces_region }}.digitaloceanspaces.com
 
-    - name: Validate and Load Configuration
+    - name: Validate Configuration
       id: load_config
       run: |
-        # Validate config file exists
-        if [ ! -f config.json ]; then
-          echo "::error::Configuration file not found at ${{ inputs.config_path }}"
-          exit 1
-        fi
-
-        # Install jq for JSON parsing
         sudo apt-get install jq -y
-
-        # Extract configuration with validation
         extract_config() {
           local value=$(jq -r ".$1" config.json)
           if [ "$value" == "null" ]; then
-            echo "::error::Missing required config parameter: $1"
+            echo "::error::Missing required parameter: $1"
             exit 1
           fi
           echo "$value"
         }
+        echo "DROPLET_NAME=$(extract_config "droplet_name")" >> $GITHUB_ENV
+        echo "REGION=$(extract_config "region")" >> $GITHUB_ENV
+        echo "IMAGE=$(extract_config "image")" >> $GITHUB_ENV
+        echo "SIZE=$(extract_config "size")" >> $GITHUB_ENV
+        echo "SSH_KEY_NAME=$(extract_config "ssh_key_name")" >> $GITHUB_ENV
+        echo "ENABLE_MONITORING=$(extract_config "enable_monitoring")" >> $GITHUB_ENV
+        echo "RESERVED_IP=$(jq -r '.reserved_ip // empty' config.json)" >> $GITHUB_ENV
 
-        # Required parameters
-        DROPLET_NAME=$(extract_config "droplet_name")
-        REGION=$(extract_config "region")
-        IMAGE=$(extract_config "image")
-        SIZE=$(extract_config "size")
-        SSH_KEY_NAME=$(extract_config "ssh_key_name")
-        ENABLE_MONITORING=$(extract_config "enable_monitoring")
-
-        # Optional parameters
-        RESERVED_IP=$(jq -r '.reserved_ip // empty' config.json)
-
-        # Set environment variables
-        echo "DROPLET_NAME=$DROPLET_NAME" >> $GITHUB_ENV
-        echo "REGION=$REGION" >> $GITHUB_ENV
-        echo "IMAGE=$IMAGE" >> $GITHUB_ENV
-        echo "SIZE=$SIZE" >> $GITHUB_ENV
-        echo "SSH_KEY_NAME=$SSH_KEY_NAME" >> $GITHUB_ENV
-        echo "RESERVED_IP=$RESERVED_IP" >> $GITHUB_ENV
-        echo "ENABLE_MONITORING=$ENABLE_MONITORING" >> $GITHUB_ENV
-
+    # DigitalOcean Setup
     - name: Install and Authenticate doctl
       env:
         DIGITALOCEAN_ACCESS_TOKEN: ${{ secrets.DO_TOKEN }}
@@ -110,16 +81,11 @@ jobs:
         sudo snap install doctl --classic
         doctl auth init --access-token $DIGITALOCEAN_ACCESS_TOKEN
 
-    - name: Validate SSH Key Exists
+    # SSH Key Validation
+    - name: Validate SSH Key
       id: ssh_key_check
       run: |
-        # Get the SSH key ID directly using exact name matching
-        echo "Looking for SSH key named '$SSH_KEY_NAME'..."
         SSH_KEY_LIST=$(doctl compute ssh-key list --format Name,ID --no-header)
-        echo "Available SSH keys:"
-        echo "$SSH_KEY_LIST"
-        
-        # Use a loop to properly match the exact key name
         SSH_KEY_ID=""
         while IFS= read -r line; do
           KEY_NAME=$(echo "$line" | awk '{$NF=""; print $0}' | sed 's/[[:space:]]*$//')
@@ -129,282 +95,88 @@ jobs:
             break
           fi
         done <<< "$SSH_KEY_LIST"
-        
-        if [ -z "$SSH_KEY_ID" ]; then
-          echo "::error::SSH key '$SSH_KEY_NAME' not found!"
+        if [ -z "$SSH_KEY_ID" ] || ! [[ "$SSH_KEY_ID" =~ ^[0-9]+$ ]]; then
+          echo "::error::SSH key validation failed"
           exit 1
         fi
-        
-        # Verify this is a numeric ID
-        if ! [[ "$SSH_KEY_ID" =~ ^[0-9]+$ ]]; then
-          echo "::error::Invalid SSH key ID format: $SSH_KEY_ID. Expected a numeric ID."
-          exit 1
-        fi
-        
-        echo "Found SSH key '$SSH_KEY_NAME' with ID: $SSH_KEY_ID"
         echo "SSH_KEY_ID=$SSH_KEY_ID" >> $GITHUB_ENV
 
+    # Reserved IP Handling
     - name: Prepare Reserved IP
       id: prepare_ip
       run: |
-        # Use reserved IP from config or create new one
-        if [ -n "$RESERVED_IP" ]; then
-          echo "Using specified IP: $RESERVED_IP"
-        else
-          echo "Creating new reserved IP in $REGION..."
+        if [ -z "$RESERVED_IP" ]; then
           RESERVED_IP=$(doctl compute floating-ip create --region $REGION --format IP --no-header)
-          echo "Created new IP: $RESERVED_IP"
-        fi
-        
-        # Verify IP exists
-        if ! doctl compute floating-ip get $RESERVED_IP &> /dev/null; then
-          echo "::error::Reserved IP $RESERVED_IP not found in DigitalOcean"
-          exit 1
-        fi
-
-        # Force unassign if needed
-        echo "Checking current assignment..."
-        ASSIGNMENT=$(doctl compute floating-ip get $RESERVED_IP --format DropletID --no-header | xargs)
-        if [ -n "$ASSIGNMENT" ] && [ "$ASSIGNMENT" != "null" ]; then
-          echo "Unassigning IP from droplet $ASSIGNMENT..."
-          doctl compute floating-ip-action unassign $RESERVED_IP || true
-          
-          # Wait for unassignment to complete
-          echo "Waiting for IP to be fully unassigned..."
-          sleep 15
         else
-          echo "IP is already unassigned, no action needed"
+          ASSIGNMENT=$(doctl compute floating-ip get $RESERVED_IP --format DropletID --no-header | xargs)
+          if [ -n "$ASSIGNMENT" ] && [ "$ASSIGNMENT" != "null" ]; then
+            doctl compute floating-ip-action unassign $RESERVED_IP || true
+            sleep 15
+          fi
         fi
-
         echo "RESERVED_IP=$RESERVED_IP" >> $GITHUB_ENV
-        echo "reserved_ip=$RESERVED_IP" >> $GITHUB_OUTPUT
 
+    # Droplet Creation
     - name: Create Droplet
       id: create_droplet
       run: |
-        # Get the reserved IP from previous step
-        RESERVED_IP=${{ env.RESERVED_IP }}
-        
-        # Check IP assignment status - consider various "unassigned" states as valid
-        IP_STATUS=$(doctl compute floating-ip get $RESERVED_IP --format Status --no-header | xargs)
-        echo "IP_STATUS=[${IP_STATUS}]"
-        
-        # Accept empty, "null", "<nil>", or "unassigned" as valid states
-        if [ "$IP_STATUS" != "" ] && [ "$IP_STATUS" != "null" ] && [ "$IP_STATUS" != "<nil>" ] && [ "$IP_STATUS" != "unassigned" ]; then
-          echo "::error::Reserved IP $RESERVED_IP is in invalid state: $IP_STATUS"
-          exit 1
-        fi
-
-        # Build creation command
         MONITORING_FLAG=""
         if [[ "$ENABLE_MONITORING" == "true" ]]; then
           MONITORING_FLAG="--enable-monitoring"
         fi
-        
-        DROPLET_CMD="doctl compute droplet create $DROPLET_NAME \
+        DROPLET_JSON=$(doctl compute droplet create $DROPLET_NAME \
           --region $REGION \
           --image $IMAGE \
           --size $SIZE \
           --ssh-keys $SSH_KEY_ID \
-          --tag-names prod,web-server \
           $MONITORING_FLAG \
-          --output json"
-
-        echo "Creating droplet with command:"
-        echo "$DROPLET_CMD"
-
-        # Execute creation and parse output
-        DROPLET_JSON=$($DROPLET_CMD)
+          --output json)
         DROPLET_ID=$(echo "$DROPLET_JSON" | jq -r '.[0].id')
         echo "DROPLET_ID=$DROPLET_ID" >> $GITHUB_ENV
         echo "droplet_id=$DROPLET_ID" >> $GITHUB_OUTPUT
 
         # Wait for active status
-        echo "Waiting for droplet to become active..."
         while true; do
           STATUS=$(doctl compute droplet get $DROPLET_ID --format Status --no-header | xargs)
-          echo "Current status: $STATUS"
           [[ "$STATUS" == "active" ]] && break
           sleep 10
         done
-
-        # Add a delay to allow internal DO operations to complete
-        echo "Droplet is active. Waiting 60 seconds for internal operations to complete..."
         sleep 60
 
-        # Assign reserved IP
-        echo "Assigning reserved IP $RESERVED_IP to droplet $DROPLET_ID..."
+        # Assign IP
         doctl compute floating-ip-action assign $RESERVED_IP $DROPLET_ID
-
-        # Wait for IP assignment to complete
-        echo "Waiting for IP assignment to complete..."
         sleep 30
-        
-        # Verify assignment
-        ASSIGNED_TO=$(doctl compute floating-ip get $RESERVED_IP --format DropletID --no-header | xargs)
-        if [[ "$ASSIGNED_TO" == "$DROPLET_ID" ]]; then
-          echo "✅ IP successfully assigned to droplet"
-        else
-          echo "⚠️ IP assignment verification failed. Assignment status: $ASSIGNED_TO"
-        fi
-        
         echo "DROPLET_IP=$RESERVED_IP" >> $GITHUB_ENV
 
-    - name: Set up SSH
+    # SSH Setup and Verification
+    - name: Set up SSH Agent
       uses: webfactory/ssh-agent@v0.5.4
       with:
         ssh-private-key: ${{ secrets.DO_SSH_PRIVATE_KEY }}
 
-    - name: Wait for SSH service
+    - name: Wait for SSH
       run: |
-        echo "Waiting for SSH service to start (180 seconds)..."
+        echo "Waiting 180 seconds for SSH..."
         sleep 180
-        echo "Proceeding with SSH verification..."
 
-    - name: Network Diagnostics
+    - name: Verify SSH Connection
+      continue-on-error: true
       run: |
-        echo "Running network diagnostics for ${{ env.RESERVED_IP }}..."
-        
-        # Check if IP is pingable
-        echo "Testing ping to ${{ env.RESERVED_IP }}..."
-        ping -c 4 ${{ env.RESERVED_IP }} || echo "Ping failed but continuing..."
-        
-        # Check if port 22 is reachable
-        echo "Testing TCP connection to port 22..."
-        nc -zv -w 5 ${{ env.RESERVED_IP }} 22 || echo "Port 22 not reachable yet but continuing..."
-        
-        # Get droplet details
-        echo "Retrieving droplet details..."
-        doctl compute droplet get ${{ env.DROPLET_ID }} --format "ID,Name,PublicIPv4,Status,Features"
-
-    - name: Verify Deployment
-      continue-on-error: true  # Don't fail workflow if SSH can't connect
-      run: |
-        echo "Verifying droplet connectivity..."
         MAX_RETRIES=15
-        RETRY_COUNT=0
-        
-        # Add the server to known hosts to avoid prompts
-        mkdir -p ~/.ssh
-        ssh-keyscan -H ${{ env.RESERVED_IP }} >> ~/.ssh/known_hosts 2>/dev/null || true
-        
-        # Configure SSH with explicit key path (trying approach from do-provision-droplet.yml)
-        echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK"
-        ssh-add -l
-        
-        # Retry SSH connection until successful or max retries reached
-        echo "Testing SSH connectivity to ${{ env.RESERVED_IP }}..."
-        while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-          # First try approach similar to do-provision-droplet.yml
-          if [ $RETRY_COUNT -lt 5 ]; then
-            if ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=15 root@${{ env.RESERVED_IP }} "echo SSH connection successful"; then
-              echo "✅ SSH connection established successfully!"
-              echo "SSH_SUCCESS=true" >> $GITHUB_ENV
-              exit 0
-            fi
-          else
-            # Then try the verbose debug approach
-            if timeout 30 ssh -v -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=15 root@${{ env.RESERVED_IP }} echo "SSH connection successful"; then
-              echo "✅ SSH connection established successfully!"
-              echo "SSH_SUCCESS=true" >> $GITHUB_ENV
-              exit 0
-            fi
+        for ((i=1; i<=MAX_RETRIES; i++)); do
+          if ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=15 root@${{ env.RESERVED_IP }} "echo success"; then
+            echo "SSH_SUCCESS=true" >> $GITHUB_ENV
+            exit 0
           fi
-          
-          RETRY_COUNT=$((RETRY_COUNT+1))
-          echo "❌ SSH connection failed. Retrying ($RETRY_COUNT/$MAX_RETRIES)..."
           sleep 20
         done
-        
-        echo "⚠️ WARNING: Could not establish SSH connection after $MAX_RETRIES attempts."
-        echo "The droplet has been created and the IP assigned, but SSH connection could not be verified."
         echo "SSH_SUCCESS=false" >> $GITHUB_ENV
-        
-        # Print SSH debug info
-        echo "SSH debugging information:"
-        ssh -v -o BatchMode=yes -o ConnectTimeout=5 root@${{ env.RESERVED_IP }} 2>&1 | head -n 20
 
-    - name: SSH Verification Workaround
-      if: ${{ env.SSH_SUCCESS != 'true' }}
+    # Final Output
+    - name: Deployment Summary
       run: |
-        echo "===== Droplet Creation Verification ====="
-        
-        # Check if droplet exists
-        DROPLET_STATUS=$(doctl compute droplet get ${{ env.DROPLET_ID }} --format Status --no-header)
-        
-        if [ "$DROPLET_STATUS" == "active" ]; then
-          echo "✅ Droplet Verification: Droplet exists and is active"
-          echo "✅ IP Assignment: ${{ env.RESERVED_IP }} assigned to droplet ${{ env.DROPLET_ID }}"
-          echo "✅ Provisioning complete, but SSH connection not verified"
-          
-          # Store result for workflow output
-          echo "PROVISIONING_RESULT=success" >> $GITHUB_ENV
-        else
-          echo "❌ Droplet Verification Failed: Droplet status is $DROPLET_STATUS"
-          echo "⚠️ Manual verification needed"
-          
-          # Store result for workflow output
-          echo "PROVISIONING_RESULT=unknown" >> $GITHUB_ENV
-        fi
-
-    - name: Output Deployment Info
-      run: |
-        echo "============= DEPLOYMENT SUMMARY ============="
-        echo "Droplet Name: $DROPLET_NAME"
-        echo "IP Address: ${{ env.RESERVED_IP }}"
-        echo "ID: ${{ env.DROPLET_ID }}"
-        echo "Region: $REGION"
-        echo "Size: $SIZE"
-        echo "SSH Connection: ${SSH_SUCCESS:-false}"
-        
-        # If SSH failed, provide debugging guidance
-        if [[ "${SSH_SUCCESS:-false}" != "true" ]]; then
-          echo ""
-          echo "============= TROUBLESHOOTING TIPS ============="
-          echo "1. The droplet was created successfully but SSH connection could not be established."
-          echo "2. This is sometimes normal for new droplets as the SSH service may take longer to start."
-          echo "3. You can try connecting manually: ssh root@${{ env.RESERVED_IP }}"
-          echo "4. Check if the correct SSH key ($SSH_KEY_NAME) was used during creation."
-          echo "5. Verify the droplet's status in the DigitalOcean console."
-          echo "6. Consider checking if there are any active firewalls blocking SSH access."
-          echo ""
-          echo "Note: Despite the SSH connection failure, the workflow has completed the droplet provisioning."
-        fi
-
-    - name: Generate SSH Connection Instructions
-      run: |
-        cat > ssh_instructions.txt << EOF
-        # SSH Connection Instructions
-        
-        Your droplet has been successfully created with the following details:
-        
-        - Droplet Name: $DROPLET_NAME
-        - IP Address: ${{ env.RESERVED_IP }}
-        - Region: $REGION
-        - Size: $SIZE
-        
-        ## To connect to your droplet:
-        
-        ssh root@${{ env.RESERVED_IP }}
-        
-        Note: It may take a few minutes for the SSH service to become available.
-        If connection fails, please wait 5-10 minutes and try again.
-        
-        ## Troubleshooting:
-        
-        1. Make sure you're using the private key that matches the configured SSH key: $SSH_KEY_NAME
-        2. Check if there are any firewalls blocking outbound SSH connections
-        3. Verify the droplet status in the DigitalOcean control panel
-        
-        EOF
-        
-        echo "SSH connection instructions saved to ssh_instructions.txt"
-        cat ssh_instructions.txt
-
-    - name: Mark Workflow as Successful
-      run: |
-        echo "Deployment completed - droplet provisioned successfully!"
         echo "Droplet IP: ${{ env.RESERVED_IP }}"
-        echo "Even though SSH verification might have failed, the droplet is likely created correctly."
-        echo "SSH often takes longer to initialize than this workflow can reasonably wait for."
-        echo "See the instructions above for manually connecting to your droplet."
+        echo "SSH Status: ${SSH_SUCCESS:-false}"
+        if [[ "${SSH_SUCCESS:-false}" != "true" ]]; then
+          echo "Manual connection: ssh root@${{ env.RESERVED_IP }}"
+        fi
