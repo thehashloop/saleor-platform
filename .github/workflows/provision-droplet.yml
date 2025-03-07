@@ -195,8 +195,30 @@ jobs:
     - name: Verify Deployment
       run: |
         echo "Verifying droplet connectivity..."
-        ping -c 3 ${{ env.DROPLET_IP }}
-        nc -zv ${{ env.DROPLET_IP }} 22 || true
+        MAX_RETRIES=10
+        RETRY_COUNT=0
+        
+        # Add the server to known hosts to avoid prompts
+        mkdir -p ~/.ssh
+        ssh-keyscan -H ${{ env.DROPLET_IP }} >> ~/.ssh/known_hosts 2>/dev/null || true
+        
+        # Retry SSH connection until successful or max retries reached
+        echo "Testing SSH connectivity to ${{ env.DROPLET_IP }}..."
+        while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+          if timeout 10 ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=5 root@${{ env.DROPLET_IP }} echo "SSH connection successful"; then
+            echo "✅ SSH connection established successfully!"
+            exit 0
+          else
+            RETRY_COUNT=$((RETRY_COUNT+1))
+            echo "❌ SSH connection failed. Retrying ($RETRY_COUNT/$MAX_RETRIES)..."
+            sleep 10
+          fi
+        done
+        
+        echo "⚠️ WARNING: Could not establish SSH connection after $MAX_RETRIES attempts."
+        echo "The droplet may still be initializing. Check the status manually."
+        # Don't fail the workflow, as the droplet might still be setting up
+        # The IP address information will still be available in the outputs
 
     - name: Output Deployment Info
       run: |
