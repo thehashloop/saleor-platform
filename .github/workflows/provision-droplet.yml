@@ -119,12 +119,12 @@ jobs:
         # Get the reserved IP from previous step
         RESERVED_IP=${{ env.RESERVED_IP }}
         
-        # Check IP assignment status - consider both nil and "unassigned" as valid
+        # Check IP assignment status - consider various "unassigned" states as valid
         IP_STATUS=$(doctl compute floating-ip get $RESERVED_IP --format Status --no-header | xargs)
         echo "IP_STATUS=[${IP_STATUS}]"
         
-        # Consider null, empty, "null", or "unassigned" as valid states
-        if [ -n "$IP_STATUS" ] && [ "$IP_STATUS" != "null" ] && [ "$IP_STATUS" != "unassigned" ]; then
+        # Accept empty, "null", "<nil>", or "unassigned" as valid states
+        if [ "$IP_STATUS" != "" ] && [ "$IP_STATUS" != "null" ] && [ "$IP_STATUS" != "<nil>" ] && [ "$IP_STATUS" != "unassigned" ]; then
           echo "::error::Reserved IP $RESERVED_IP is in invalid state: $IP_STATUS"
           exit 1
         fi
