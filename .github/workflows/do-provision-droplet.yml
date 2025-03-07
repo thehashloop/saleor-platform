@@ -95,7 +95,8 @@ jobs:
               --size s-2vcpu-4gb \
               --ssh-keys ${SSH_KEY_ID} \
               --enable-monitoring \
-              --output json | jq -r '.[0].id')
+              --format ID \
+              --no-header)
           fi
         else
           # Verify SSH key
@@ -111,7 +112,8 @@ jobs:
             --size s-2vcpu-4gb \
             --ssh-keys ${SSH_KEY_ID} \
             --enable-monitoring \
-            --output json | jq -r '.[0].id')
+            --format ID \
+            --no-header)
         fi
         
         echo "Droplet ID: $DROPLET_ID"
