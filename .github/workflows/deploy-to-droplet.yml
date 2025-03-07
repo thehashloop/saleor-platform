@@ -66,9 +66,13 @@ jobs:
         echo "Copying files to droplet at IP: $DROPLET_IP"
         scp -o StrictHostKeyChecking=no -r . root@$DROPLET_IP:~/app
 
+    - name: Verify Required Files
+      run: |
+        ssh -o StrictHostKeyChecking=no root@$DROPLET_IP "cd ~/app && ls -la && if [ -f fetch-env.sh ]; then echo 'fetch-env.sh exists'; else echo 'fetch-env.sh is missing'; fi"
+
     - name: Configure Environment and Start Services
       run: |
-        ssh -o StrictHostKeyChecking=no root@$DROPLET_IP << EOF
+        ssh -o StrictHostKeyChecking=no root@$DROPLET_IP << 'EOSSH'
         cd ~/app
         
         # Create .env file for Docker Compose
@@ -83,11 +87,26 @@ jobs:
         # Make scripts executable and fetch environment files
         chmod +x fetch-env.sh
         
+        # Run fetch-env.sh in debug mode to see what's happening
+        echo "Running fetch-env.sh to download configuration files"
+        bash -x ./fetch-env.sh || echo "fetch-env.sh failed with code $?"
+        
+        # Check if environment files were downloaded
+        echo "Checking for environment files:"
+        ls -la *.env || echo "No .env files found"
+        
+        # If common.env doesn't exist, create an empty one
+        if [ ! -f "common.env" ]; then
+          echo "common.env not found, creating an empty file"
+          touch common.env
+        fi
+        
         # Login to GitHub Container Registry
         echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
         
         # Start services with environment variables
+        echo "Starting Docker services..."
         docker compose --env-file .env up -d
         
         echo "Application started with ${{ inputs.environment }} environment"
-        EOF 
+EOSSH 

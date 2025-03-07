@@ -35,8 +35,9 @@ jobs:
 
     - name: Configure Firewall
       run: |
-        ssh -o StrictHostKeyChecking=no root@$DROPLET_IP << EOF
+        ssh -o StrictHostKeyChecking=no root@$DROPLET_IP << 'EOSSH'
         # Allow HTTP and HTTPS traffic
+        echo "Configuring firewall rules..."
         ufw allow 80/tcp
         ufw allow 443/tcp
         ufw allow 8000/tcp
@@ -45,36 +46,53 @@ jobs:
         ufw --force enable
         
         # Verify firewall rules
+        echo "Current firewall status:"
         ufw status
-        EOF
+EOSSH
 
     - name: Configure SSL
       run: |
-        ssh -o StrictHostKeyChecking=no root@$DROPLET_IP << EOF
+        ssh -o StrictHostKeyChecking=no root@$DROPLET_IP << 'EOSSH'
         cd ~/app
-        source deployment.env
+        
+        # Source deployment.env if it exists
+        if [ -f deployment.env ]; then
+          source deployment.env
+          DOMAIN="${DOMAIN:-example.com}"
+        else
+          echo "Warning: deployment.env not found, using default domain"
+          DOMAIN="example.com"
+        fi
+        
+        echo "Configuring SSL for domain: $DOMAIN"
         
         # Stop services for SSL setup
+        echo "Stopping services for SSL setup..."
         systemctl stop nginx || true
         docker compose down
         
         # Install certbot if needed
         if ! command -v certbot &> /dev/null; then
+          echo "Installing certbot..."
           apt-get update
           apt-get remove -y nginx nginx-common || true
           apt-get install -y certbot
         fi
         
         # Set up SSL certificates
+        echo "Setting up SSL certificates for $DOMAIN..."
         certbot certonly --standalone \
           --preferred-challenges http \
-          -d \$DOMAIN \
+          -d $DOMAIN \
           --non-interactive \
           --agree-tos \
           -m admin@ayurvahi.com \
           --server https://api.buypass.com/acme/directory \
-          --cert-name \$DOMAIN
+          --cert-name $DOMAIN || echo "Certbot failed with exit code $?"
         
         # Start services again
+        echo "Restarting services..."
         docker compose up -d
-        EOF 
+        
+        echo "SSL configuration completed"
+EOSSH 

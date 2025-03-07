@@ -33,41 +33,74 @@ jobs:
       with:
         ssh-private-key: ${{ secrets.DO_SSH_PRIVATE_KEY }}
 
+    - name: Check Environment Files
+      run: |
+        ssh -o StrictHostKeyChecking=no root@$DROPLET_IP "cd ~/app && ls -la *.env || echo 'No env files found'"
+
     - name: Initialize Database
       run: |
-        ssh -o StrictHostKeyChecking=no root@$DROPLET_IP << EOF
+        ssh -o StrictHostKeyChecking=no root@$DROPLET_IP << 'EOSSH'
         cd ~/app
-        source deployment.env
+        
+        # Source deployment.env if it exists
+        if [ -f deployment.env ]; then
+          source deployment.env
+        else
+          echo "Warning: deployment.env not found, continuing with defaults"
+          # Set default values for required variables
+          POPULATE_DB="${POPULATE_DB:-false}"
+          CREATE_SUPERUSER="${CREATE_SUPERUSER:-false}"
+        fi
         
         # Run migrations
+        echo "Running database migrations..."
         docker compose run --rm api python3 manage.py migrate
         
         # Populate database if configured
-        if [[ "\$POPULATE_DB" == "true" ]]; then
+        if [[ "${POPULATE_DB}" == "true" ]]; then
+          echo "Populating database with sample data..."
           docker compose run --rm api python3 manage.py populatedb
           echo "Database populated with sample data"
+        else
+          echo "Skipping database population (POPULATE_DB is not set to true)"
         fi
         
         # Create superuser if configured
-        if [[ "\$CREATE_SUPERUSER" == "true" ]]; then
-          docker compose run --rm -e DJANGO_SUPERUSER_PASSWORD="\$SUPERUSER_PASSWORD" \
-            -e DJANGO_SUPERUSER_EMAIL="\$SUPERUSER_EMAIL" \
+        if [[ "${CREATE_SUPERUSER}" == "true" ]]; then
+          echo "Creating superuser..."
+          # Check if superuser credentials are set
+          if [ -z "${SUPERUSER_PASSWORD}" ] || [ -z "${SUPERUSER_EMAIL}" ]; then
+            echo "Warning: Superuser credentials not set, using defaults"
+            SUPERUSER_EMAIL="${SUPERUSER_EMAIL:-admin@example.com}"
+            SUPERUSER_PASSWORD="${SUPERUSER_PASSWORD:-adminpassword}"
+          fi
+          
+          docker compose run --rm -e DJANGO_SUPERUSER_PASSWORD="${SUPERUSER_PASSWORD}" \
+            -e DJANGO_SUPERUSER_EMAIL="${SUPERUSER_EMAIL}" \
             api python3 manage.py createsuperuser --noinput
           echo "Superuser created successfully"
+        else
+          echo "Skipping superuser creation (CREATE_SUPERUSER is not set to true)"
         fi
-        EOF
+EOSSH
 
     - name: Verify Deployment
       run: |
-        ssh -o StrictHostKeyChecking=no root@$DROPLET_IP << EOF
+        ssh -o StrictHostKeyChecking=no root@$DROPLET_IP << 'EOSSH'
         cd ~/app
-        source deployment.env
         
-        echo "Current environment: \$(cat .env_current)"
-        echo "Domain: \$DOMAIN"
+        # Source deployment.env if it exists
+        if [ -f deployment.env ]; then
+          source deployment.env
+          echo "Current environment: $(cat .env_current 2>/dev/null || echo 'unknown')"
+          echo "Domain: $DOMAIN"
+        else
+          echo "Warning: deployment.env not found"
+        fi
+        
         echo "Container status:"
         docker compose ps
         
         echo "Container logs:"
         docker compose logs --tail=20
-        EOF 
+EOSSH 
