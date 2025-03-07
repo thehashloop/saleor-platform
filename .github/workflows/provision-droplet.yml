@@ -76,6 +76,7 @@ jobs:
           exit 1
         fi
         echo "SSH_KEY_ID=$SSH_KEY_ID" >> $GITHUB_ENV
+        echo "Found SSH key '${{ inputs.ssh_key_name }}' with ID: $SSH_KEY_ID"
 
     - name: Prepare Reserved IP
       id: prepare_ip
