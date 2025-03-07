@@ -7,7 +7,7 @@ on:
         description: 'Name for the droplet'
         required: true
         type: string
-        default: 'production-server'
+        default: 'githu actions'
       region:
         description: 'DigitalOcean region'
         required: true
