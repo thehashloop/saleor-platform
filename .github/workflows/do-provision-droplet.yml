@@ -157,22 +157,23 @@ jobs:
         ssh -o StrictHostKeyChecking=no root@${{ env.DROPLET_IP }} << EOF
         cd ~/app
         
-        # Export environment variables
-        export ENVIRONMENT="${{ inputs.environment }}"
-        export DO_SPACES_KEY="${{ secrets.DO_SPACES_KEY }}"
-        export DO_SPACES_SECRET="${{ secrets.DO_SPACES_SECRET }}"
-        export DO_SPACES_NAME="${{ inputs.spaces_name }}"
-        export DO_SPACES_REGION="${{ inputs.spaces_region }}"
+        # Create .env file for Docker Compose
+        cat > .env << EOL
+        DO_SPACES_KEY=${{ secrets.DO_SPACES_KEY }}
+        DO_SPACES_SECRET=${{ secrets.DO_SPACES_SECRET }}
+        DO_SPACES_NAME=${{ inputs.spaces_name }}
+        DO_SPACES_REGION=${{ inputs.spaces_region }}
+        ENVIRONMENT=${{ inputs.environment }}
+        EOL
         
         # Make scripts executable and fetch environment files
         chmod +x fetch-env.sh
-        ./fetch-env.sh
         
         # Login to GitHub Container Registry
         echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
         
-        # Start services with the specified environment
-        ENVIRONMENT=${{ inputs.environment }} docker compose up -d
+        # Start services with environment variables
+        docker compose --env-file .env up -d
         
         echo "Application started with ${{ inputs.environment }} environment"
         EOF
