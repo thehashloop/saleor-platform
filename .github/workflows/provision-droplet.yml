@@ -1,53 +1,23 @@
-name: Provision Droplet
+name: Provision Droplet from Spaces Config
 
 on:
   workflow_dispatch:
     inputs:
-      droplet_name:
-        description: 'Name for the droplet'
+      spaces_region:
+        description: 'DigitalOcean Spaces region (e.g., nyc3)'
         required: true
         type: string
-        default: 'githu actions'
-      region:
-        description: 'DigitalOcean region'
-        required: true
-        type: choice
         default: 'blr1'
-        options:
-          - 'blr1'
-          - 'sgp1'
-          - 'nyc3'
-      image:
-        description: 'Base image slug'
+      spaces_bucket:
+        description: 'DigitalOcean Spaces bucket name'
         required: true
         type: string
-        default: 'docker-20-04'
-      size:
-        description: 'Droplet size slug'
-        required: true
-        type: choice
-        default: 's-2vcpu-4gb'
-        options:
-          - 's-1vcpu-1gb'
-          - 's-2vcpu-4gb'
-          - 's-4vcpu-8gb'
-      ssh_key_name:
-        description: 'Name of SSH key to inject'
+        default: 'ayurvahi-config'
+      config_path:
+        description: 'Path to config file in Spaces (e.g., configs/prod.json)'
         required: true
         type: string
-        default: 'production-key'
-      reserved_ip:
-        description: 'Reserved IP address to assign (leave blank to auto-create)'
-        required: false
-        type: string
-        default: ''
-      enable_monitoring:
-        description: 'Enable droplet monitoring'
-        type: boolean
-        default: true
-
-env:
-  DROPLET_TAGS: 'prod,web-server'
+        default: 'env-files/dev/config.json'
 
 jobs:
   provision:
@@ -60,6 +30,62 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v3
 
+    - name: Configure AWS Credentials for Spaces
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.SPACES_ACCESS_KEY }}
+        aws-secret-access-key: ${{ secrets.SPACES_SECRET_KEY }}
+        aws-region: ${{ inputs.spaces_region }}
+
+    - name: Download Configuration File
+      run: |
+        echo "Downloading config from s3://${{ inputs.spaces_bucket }}/${{ inputs.config_path }}"
+        mkdir -p config
+        aws s3 cp s3://${{ inputs.spaces_bucket }}/${{ inputs.config_path }} config.json \
+          --endpoint-url https://${{ inputs.spaces_region }}.digitaloceanspaces.com
+
+    - name: Validate and Load Configuration
+      id: load_config
+      run: |
+        # Validate config file exists
+        if [ ! -f config.json ]; then
+          echo "::error::Configuration file not found at ${{ inputs.config_path }}"
+          exit 1
+        fi
+
+        # Install jq for JSON parsing
+        sudo apt-get install jq -y
+
+        # Extract configuration with validation
+        extract_config() {
+          local value=$(jq -r ".$1" config.json)
+          if [ "$value" == "null" ]; then
+            echo "::error::Missing required config parameter: $1"
+            exit 1
+          fi
+          echo "$value"
+        }
+
+        # Required parameters
+        DROPLET_NAME=$(extract_config "droplet_name")
+        REGION=$(extract_config "region")
+        IMAGE=$(extract_config "image")
+        SIZE=$(extract_config "size")
+        SSH_KEY_NAME=$(extract_config "ssh_key_name")
+        ENABLE_MONITORING=$(extract_config "enable_monitoring")
+
+        # Optional parameters
+        RESERVED_IP=$(jq -r '.reserved_ip // empty' config.json)
+
+        # Set environment variables
+        echo "DROPLET_NAME=$DROPLET_NAME" >> $GITHUB_ENV
+        echo "REGION=$REGION" >> $GITHUB_ENV
+        echo "IMAGE=$IMAGE" >> $GITHUB_ENV
+        echo "SIZE=$SIZE" >> $GITHUB_ENV
+        echo "SSH_KEY_NAME=$SSH_KEY_NAME" >> $GITHUB_ENV
+        echo "RESERVED_IP=$RESERVED_IP" >> $GITHUB_ENV
+        echo "ENABLE_MONITORING=$ENABLE_MONITORING" >> $GITHUB_ENV
+
     - name: Install and Authenticate doctl
       env:
         DIGITALOCEAN_ACCESS_TOKEN: ${{ secrets.DO_TOKEN }}
@@ -71,25 +97,24 @@ jobs:
       id: ssh_key_check
       run: |
         # Get the SSH key ID directly using exact name matching
-        echo "Looking for SSH key named '${{ inputs.ssh_key_name }}'..."
+        echo "Looking for SSH key named '$SSH_KEY_NAME'..."
         SSH_KEY_LIST=$(doctl compute ssh-key list --format Name,ID --no-header)
         echo "Available SSH keys:"
         echo "$SSH_KEY_LIST"
         
-        # Use a different approach for extracting the ID that handles spaces better
         # Use a loop to properly match the exact key name
         SSH_KEY_ID=""
         while IFS= read -r line; do
           KEY_NAME=$(echo "$line" | awk '{$NF=""; print $0}' | sed 's/[[:space:]]*$//')
           KEY_ID=$(echo "$line" | awk '{print $NF}')
-          if [ "$KEY_NAME" = "${{ inputs.ssh_key_name }}" ]; then
+          if [ "$KEY_NAME" = "$SSH_KEY_NAME" ]; then
             SSH_KEY_ID="$KEY_ID"
             break
           fi
         done <<< "$SSH_KEY_LIST"
         
         if [ -z "$SSH_KEY_ID" ]; then
-          echo "::error::SSH key '${{ inputs.ssh_key_name }}' not found!"
+          echo "::error::SSH key '$SSH_KEY_NAME' not found!"
           exit 1
         fi
         
@@ -99,19 +124,18 @@ jobs:
           exit 1
         fi
         
-        echo "Found SSH key '${{ inputs.ssh_key_name }}' with ID: $SSH_KEY_ID"
+        echo "Found SSH key '$SSH_KEY_NAME' with ID: $SSH_KEY_ID"
         echo "SSH_KEY_ID=$SSH_KEY_ID" >> $GITHUB_ENV
 
     - name: Prepare Reserved IP
       id: prepare_ip
       run: |
-        # Use provided IP or create new one if empty
-        if [ -n "${{ inputs.reserved_ip }}" ]; then
-          RESERVED_IP=${{ inputs.reserved_ip }}
+        # Use reserved IP from config or create new one
+        if [ -n "$RESERVED_IP" ]; then
           echo "Using specified IP: $RESERVED_IP"
         else
-          echo "Creating new reserved IP in ${{ inputs.region }}..."
-          RESERVED_IP=$(doctl compute floating-ip create --region ${{ inputs.region }} --format IP --no-header)
+          echo "Creating new reserved IP in $REGION..."
+          RESERVED_IP=$(doctl compute floating-ip create --region $REGION --format IP --no-header)
           echo "Created new IP: $RESERVED_IP"
         fi
         
@@ -156,16 +180,16 @@ jobs:
 
         # Build creation command
         MONITORING_FLAG=""
-        if [[ "${{ inputs.enable_monitoring }}" == "true" ]]; then
+        if [[ "$ENABLE_MONITORING" == "true" ]]; then
           MONITORING_FLAG="--enable-monitoring"
         fi
         
-        DROPLET_CMD="doctl compute droplet create ${{ inputs.droplet_name }} \
-          --region ${{ inputs.region }} \
-          --image ${{ inputs.image }} \
-          --size ${{ inputs.size }} \
-          --ssh-keys ${{ env.SSH_KEY_ID }} \
-          --tag-names ${{ env.DROPLET_TAGS }} \
+        DROPLET_CMD="doctl compute droplet create $DROPLET_NAME \
+          --region $REGION \
+          --image $IMAGE \
+          --size $SIZE \
+          --ssh-keys $SSH_KEY_ID \
+          --tag-names prod,web-server \
           $MONITORING_FLAG \
           --output json"
 
@@ -209,12 +233,12 @@ jobs:
         
         # Add the server to known hosts to avoid prompts
         mkdir -p ~/.ssh
-        ssh-keyscan -H ${{ env.DROPLET_IP }} >> ~/.ssh/known_hosts 2>/dev/null || true
+        ssh-keyscan -H $RESERVED_IP >> ~/.ssh/known_hosts 2>/dev/null || true
         
         # Retry SSH connection until successful or max retries reached
-        echo "Testing SSH connectivity to ${{ env.DROPLET_IP }}..."
+        echo "Testing SSH connectivity to $RESERVED_IP..."
         while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-          if timeout 10 ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=5 root@${{ env.DROPLET_IP }} echo "SSH connection successful"; then
+          if timeout 10 ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=5 root@$RESERVED_IP echo "SSH connection successful"; then
             echo "✅ SSH connection established successfully!"
             exit 0
           else
@@ -231,8 +255,8 @@ jobs:
 
     - name: Output Deployment Info
       run: |
-        echo "Droplet Name: ${{ inputs.droplet_name }}"
-        echo "IP Address: ${{ env.DROPLET_IP }}"
-        echo "ID: ${{ env.DROPLET_ID }}"
-        echo "Region: ${{ inputs.region }}"
-        echo "Size: ${{ inputs.size }}"
+        echo "Droplet Name: $DROPLET_NAME"
+        echo "IP Address: $RESERVED_IP"
+        echo "ID: $DROPLET_ID"
+        echo "Region: $REGION"
+        echo "Size: $SIZE"
