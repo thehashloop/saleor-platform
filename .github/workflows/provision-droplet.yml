@@ -30,12 +30,29 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v3
 
-    - name: Configure AWS Credentials for Spaces
-      uses: aws-actions/configure-aws-credentials@v2
-      with:
-        aws-access-key-id: ${{ secrets.SPACES_ACCESS_KEY }}
-        aws-secret-access-key: ${{ secrets.SPACES_SECRET_KEY }}
-        aws-region: ${{ inputs.spaces_region }}
+    - name: Set up AWS CLI for Spaces
+      run: |
+        # Install AWS CLI if needed
+        if ! command -v aws &> /dev/null; then
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip awscliv2.zip
+          sudo ./aws/install
+        fi
+        
+        # Configure AWS CLI for DigitalOcean Spaces
+        mkdir -p ~/.aws
+        cat > ~/.aws/credentials << EOF
+        [default]
+        aws_access_key_id = ${{ secrets.DO_SPACES_KEY }}
+        aws_secret_access_key = ${{ secrets.DO_SPACES_SECRET }}
+        EOF
+        
+        cat > ~/.aws/config << EOF
+        [default]
+        region = us-east-1
+        EOF
+        
+        echo "AWS CLI configured for Spaces access"
 
     - name: Download Configuration File
       run: |
@@ -224,6 +241,12 @@ jobs:
       uses: webfactory/ssh-agent@v0.5.4
       with:
         ssh-private-key: ${{ secrets.DO_SSH_PRIVATE_KEY }}
+
+    - name: Wait for SSH service
+      run: |
+        echo "Waiting for SSH service to start (120 seconds)..."
+        sleep 120
+        echo "Proceeding with SSH verification..."
 
     - name: Verify Deployment
       run: |
