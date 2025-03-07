@@ -3,14 +3,58 @@ name: Provision Droplet
 on:
   workflow_dispatch:
     inputs:
+      droplet_name:
+        description: 'Name for the droplet'
+        required: true
+        type: string
+        default: 'production-server'
+      region:
+        description: 'DigitalOcean region'
+        required: true
+        type: choice
+        default: 'blr1'
+        options:
+          - 'blr1'
+          - 'sgp1'
+          - 'nyc3'
+      image:
+        description: 'Base image slug'
+        required: true
+        type: string
+        default: 'docker-20-04'
+      size:
+        description: 'Droplet size slug'
+        required: true
+        type: choice
+        default: 's-2vcpu-4gb'
+        options:
+          - 's-1vcpu-1gb'
+          - 's-2vcpu-4gb'
+          - 's-4vcpu-8gb'
+      ssh_key_name:
+        description: 'Name of SSH key to inject'
+        required: true
+        type: string
+        default: 'production-key'
       reserved_ip:
         description: 'Reserved IP address to assign'
         required: true
         type: string
+      enable_monitoring:
+        description: 'Enable droplet monitoring'
+        type: boolean
+        default: true
+
+env:
+  DROPLET_TAGS: 'prod,web-server'
 
 jobs:
   provision:
     runs-on: ubuntu-latest
+    outputs:
+      droplet_ip: ${{ env.DROPLET_IP }}
+      droplet_id: ${{ steps.create_droplet.outputs.droplet_id }}
+    
     steps:
     - name: Checkout Code
       uses: actions/checkout@v3
@@ -22,26 +66,69 @@ jobs:
         sudo snap install doctl --classic
         doctl auth init --access-token $DIGITALOCEAN_ACCESS_TOKEN
 
+    - name: Validate SSH Key Exists
+      id: ssh_key_check
+      run: |
+        SSH_KEY_ID=$(doctl compute ssh-key list --format Name,ID | grep "${{ inputs.ssh_key_name }}" | awk '{print $2}')
+        if [ -z "$SSH_KEY_ID" ]; then
+          echo "::error::SSH key '${{ inputs.ssh_key_name }}' not found!"
+          exit 1
+        fi
+        echo "SSH_KEY_ID=$SSH_KEY_ID" >> $GITHUB_ENV
+
     - name: Create Droplet
       id: create_droplet
       run: |
-        SSH_KEY_ID=$(doctl compute ssh-key list --format ID --no-header)
-        DROPLET_ID=$(doctl compute droplet create my-droplet \
-          --region blr1 \
-          --image docker-20-04 \
-          --size s-2vcpu-4gb \
-          --ssh-keys ${SSH_KEY_ID} \
-          --enable-monitoring \
-          --output json | jq -r '.[0].id')
+        # Validate reserved IP is available
+        IP_STATUS=$(doctl compute floating-ip get ${{ inputs.reserved_ip }} --format Status --no-header)
+        if [ "$IP_STATUS" != "unassigned" ]; then
+          echo "::error::Reserved IP is already assigned!"
+          exit 1
+        fi
+
+        # Build creation command
+        MONITORING_FLAG=$([[ "${{ inputs.enable_monitoring }}" == "true" ]] && echo "--enable-monitoring" || echo "")
         
-        # Wait for droplet activation
-        while [[ $(doctl compute droplet get $DROPLET_ID --format Status --no-header) != "active" ]]; do
+        DROPLET_CMD="doctl compute droplet create ${{ inputs.droplet_name }} \
+          --region ${{ inputs.region }} \
+          --image ${{ inputs.image }} \
+          --size ${{ inputs.size }} \
+          --ssh-keys ${{ env.SSH_KEY_ID }} \
+          --tag-names ${{ env.DROPLET_TAGS }} \
+          $MONITORING_FLAG \
+          --output json"
+
+        echo "Creating droplet with command:"
+        echo "$DROPLET_CMD"
+
+        # Execute creation and parse output
+        DROPLET_JSON=$($DROPLET_CMD)
+        DROPLET_ID=$(echo "$DROPLET_JSON" | jq -r '.[0].id')
+        echo "DROPLET_ID=$DROPLET_ID" >> $GITHUB_ENV
+        echo "droplet_id=$DROPLET_ID" >> $GITHUB_OUTPUT
+
+        # Wait for active status
+        while true; do
+          STATUS=$(doctl compute droplet get $DROPLET_ID --format Status --no-header)
+          echo "Current status: $STATUS"
+          [[ "$STATUS" == "active" ]] && break
           sleep 10
         done
-        
-        # Assign IP
+
+        # Assign reserved IP
         doctl compute floating-ip-action assign ${{ inputs.reserved_ip }} $DROPLET_ID
         echo "DROPLET_IP=${{ inputs.reserved_ip }}" >> $GITHUB_ENV
 
-    - name: Output Droplet IP
-      run: echo "Droplet IP is ${{ env.DROPLET_IP }}"
+    - name: Verify Deployment
+      run: |
+        echo "Verifying droplet connectivity..."
+        ping -c 3 ${{ env.DROPLET_IP }}
+        nc -zv ${{ env.DROPLET_IP }} 22
+
+    - name: Output Deployment Info
+      run: |
+        echo "Droplet Name: ${{ inputs.droplet_name }}"
+        echo "IP Address: ${{ env.DROPLET_IP }}"
+        echo "ID: ${{ env.DROPLET_ID }}"
+        echo "Region: ${{ inputs.region }}"
+        echo "Size: ${{ inputs.size }}"
