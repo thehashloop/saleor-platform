@@ -187,6 +187,10 @@ jobs:
           sleep 10
         done
 
+        # Add a delay to allow internal DO operations to complete
+        echo "Droplet is active. Waiting 60 seconds for internal operations to complete..."
+        sleep 60
+
         # Assign reserved IP
         echo "Assigning reserved IP $RESERVED_IP to droplet $DROPLET_ID..."
         doctl compute floating-ip-action assign $RESERVED_IP $DROPLET_ID
