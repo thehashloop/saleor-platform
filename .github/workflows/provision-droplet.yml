@@ -70,13 +70,28 @@ jobs:
     - name: Validate SSH Key Exists
       id: ssh_key_check
       run: |
-        SSH_KEY_ID=$(doctl compute ssh-key list --format Name,ID | grep "${{ inputs.ssh_key_name }}" | awk '{print $2}')
+        # Get the SSH key ID directly using exact name matching
+        echo "Looking for SSH key named '${{ inputs.ssh_key_name }}'..."
+        SSH_KEY_LIST=$(doctl compute ssh-key list --format Name,ID --no-header)
+        echo "Available SSH keys:"
+        echo "$SSH_KEY_LIST"
+        
+        # Extract the numeric ID using exact name match
+        SSH_KEY_ID=$(echo "$SSH_KEY_LIST" | grep -E "^${{ inputs.ssh_key_name }}[[:space:]]" | awk '{print $2}')
+        
         if [ -z "$SSH_KEY_ID" ]; then
           echo "::error::SSH key '${{ inputs.ssh_key_name }}' not found!"
           exit 1
         fi
-        echo "SSH_KEY_ID=$SSH_KEY_ID" >> $GITHUB_ENV
+        
+        # Verify this is a numeric ID
+        if ! [[ "$SSH_KEY_ID" =~ ^[0-9]+$ ]]; then
+          echo "::error::Invalid SSH key ID format: $SSH_KEY_ID. Expected a numeric ID."
+          exit 1
+        fi
+        
         echo "Found SSH key '${{ inputs.ssh_key_name }}' with ID: $SSH_KEY_ID"
+        echo "SSH_KEY_ID=$SSH_KEY_ID" >> $GITHUB_ENV
 
     - name: Prepare Reserved IP
       id: prepare_ip
