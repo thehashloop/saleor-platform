@@ -196,6 +196,11 @@ jobs:
         doctl compute floating-ip-action assign $RESERVED_IP $DROPLET_ID
         echo "DROPLET_IP=$RESERVED_IP" >> $GITHUB_ENV
 
+    - name: Set up SSH
+      uses: webfactory/ssh-agent@v0.5.4
+      with:
+        ssh-private-key: ${{ secrets.DO_SSH_PRIVATE_KEY }}
+
     - name: Verify Deployment
       run: |
         echo "Verifying droplet connectivity..."
