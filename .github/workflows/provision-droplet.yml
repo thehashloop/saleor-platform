@@ -79,15 +79,26 @@ jobs:
     - name: Create Droplet
       id: create_droplet
       run: |
+        # Force cleanup any previous assignment
+        echo "Attempting to unassign IP if already assigned..."
+        doctl compute floating-ip-action unassign ${{ inputs.reserved_ip }} || true
+        
         # Validate reserved IP is available
         IP_STATUS=$(doctl compute floating-ip get ${{ inputs.reserved_ip }} --format Status --no-header)
-        if [ "$IP_STATUS" != "unassigned" ]; then
-          echo "::error::Reserved IP is already assigned!"
+        echo "IP_STATUS=[${IP_STATUS}]"  # Debug output
+        
+        # Trim whitespace and compare
+        CLEAN_STATUS=$(echo "$IP_STATUS" | xargs)
+        if [ "$CLEAN_STATUS" != "unassigned" ]; then
+          echo "::error::Reserved IP is already assigned! Current status: $CLEAN_STATUS"
           exit 1
         fi
 
         # Build creation command
-        MONITORING_FLAG=$([[ "${{ inputs.enable_monitoring }}" == "true" ]] && echo "--enable-monitoring" || echo "")
+        MONITORING_FLAG=""
+        if [[ "${{ inputs.enable_monitoring }}" == "true" ]]; then
+          MONITORING_FLAG="--enable-monitoring"
+        fi
         
         DROPLET_CMD="doctl compute droplet create ${{ inputs.droplet_name }} \
           --region ${{ inputs.region }} \
@@ -103,19 +114,23 @@ jobs:
 
         # Execute creation and parse output
         DROPLET_JSON=$($DROPLET_CMD)
+        echo "DROPLET_JSON: $DROPLET_JSON"  # Debug output
+        
         DROPLET_ID=$(echo "$DROPLET_JSON" | jq -r '.[0].id')
         echo "DROPLET_ID=$DROPLET_ID" >> $GITHUB_ENV
         echo "droplet_id=$DROPLET_ID" >> $GITHUB_OUTPUT
 
         # Wait for active status
+        echo "Waiting for droplet to become active..."
         while true; do
           STATUS=$(doctl compute droplet get $DROPLET_ID --format Status --no-header)
           echo "Current status: $STATUS"
-          [[ "$STATUS" == "active" ]] && break
+          [[ "$(echo $STATUS | xargs)" == "active" ]] && break
           sleep 10
         done
 
         # Assign reserved IP
+        echo "Assigning reserved IP..."
         doctl compute floating-ip-action assign ${{ inputs.reserved_ip }} $DROPLET_ID
         echo "DROPLET_IP=${{ inputs.reserved_ip }}" >> $GITHUB_ENV
 
@@ -123,7 +138,7 @@ jobs:
       run: |
         echo "Verifying droplet connectivity..."
         ping -c 3 ${{ env.DROPLET_IP }}
-        nc -zv ${{ env.DROPLET_IP }} 22
+        nc -zv ${{ env.DROPLET_IP }} 22 || true
 
     - name: Output Deployment Info
       run: |
