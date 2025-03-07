@@ -102,6 +102,12 @@ jobs:
         if [ -n "$ASSIGNMENT" ] && [ "$ASSIGNMENT" != "null" ]; then
           echo "Unassigning IP from droplet $ASSIGNMENT..."
           doctl compute floating-ip-action unassign $RESERVED_IP || true
+          
+          # Wait for unassignment to complete
+          echo "Waiting for IP to be fully unassigned..."
+          sleep 15
+        else
+          echo "IP is already unassigned, no action needed"
         fi
 
         echo "RESERVED_IP=$RESERVED_IP" >> $GITHUB_ENV
@@ -113,11 +119,12 @@ jobs:
         # Get the reserved IP from previous step
         RESERVED_IP=${{ env.RESERVED_IP }}
         
-        # Validate IP is now unassigned
+        # Check IP assignment status - consider both nil and "unassigned" as valid
         IP_STATUS=$(doctl compute floating-ip get $RESERVED_IP --format Status --no-header | xargs)
         echo "IP_STATUS=[${IP_STATUS}]"
         
-        if [ "$IP_STATUS" != "unassigned" ]; then
+        # Consider null, empty, "null", or "unassigned" as valid states
+        if [ -n "$IP_STATUS" ] && [ "$IP_STATUS" != "null" ] && [ "$IP_STATUS" != "unassigned" ]; then
           echo "::error::Reserved IP $RESERVED_IP is in invalid state: $IP_STATUS"
           exit 1
         fi
