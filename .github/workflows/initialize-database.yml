@@ -1,0 +1,63 @@
+name: Initialize Database
+
+on:
+  workflow_call:
+    inputs:
+      droplet_ip:
+        required: true
+        type: string
+    secrets:
+      DO_SSH_PRIVATE_KEY:
+        required: true
+
+jobs:
+  init-db:
+    runs-on: ubuntu-latest
+    
+    env:
+      DROPLET_IP: ${{ inputs.droplet_ip }}
+
+    steps:
+    - name: Set up SSH
+      uses: webfactory/ssh-agent@v0.5.4
+      with:
+        ssh-private-key: ${{ secrets.DO_SSH_PRIVATE_KEY }}
+
+    - name: Initialize Database
+      run: |
+        ssh -o StrictHostKeyChecking=no root@${{ inputs.droplet_ip }} << EOF
+        cd ~/app
+        source deployment.env
+        
+        # Run migrations
+        docker compose run --rm api python3 manage.py migrate
+        
+        # Populate database if configured
+        if [[ "\$POPULATE_DB" == "true" ]]; then
+          docker compose run --rm api python3 manage.py populatedb
+          echo "Database populated with sample data"
+        fi
+        
+        # Create superuser if configured
+        if [[ "\$CREATE_SUPERUSER" == "true" ]]; then
+          docker compose run --rm -e DJANGO_SUPERUSER_PASSWORD="\$SUPERUSER_PASSWORD" \
+            -e DJANGO_SUPERUSER_EMAIL="\$SUPERUSER_EMAIL" \
+            api python3 manage.py createsuperuser --noinput
+          echo "Superuser created successfully"
+        fi
+        EOF
+
+    - name: Verify Deployment
+      run: |
+        ssh -o StrictHostKeyChecking=no root@${{ inputs.droplet_ip }} << EOF
+        cd ~/app
+        source deployment.env
+        
+        echo "Current environment: \$(cat .env_current)"
+        echo "Domain: \$DOMAIN"
+        echo "Container status:"
+        docker compose ps
+        
+        echo "Container logs:"
+        docker compose logs --tail=20
+        EOF 

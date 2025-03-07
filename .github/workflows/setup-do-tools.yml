@@ -1,0 +1,146 @@
+name: Setup DigitalOcean Tools
+
+on:
+  workflow_call:
+    inputs:
+      spaces_name:
+        required: true
+        type: string
+      spaces_region:
+        required: true
+        type: string
+      environment:
+        required: true
+        type: string
+    secrets:
+      DO_TOKEN:
+        required: true
+      DO_SPACES_KEY:
+        required: true
+      DO_SPACES_SECRET:
+        required: true
+
+jobs:
+  setup-tools:
+    runs-on: ubuntu-latest
+    outputs:
+      droplet_ip: ${{ steps.create_droplet.outputs.droplet_ip }}
+    
+    env:
+      ENVIRONMENT: ${{ inputs.environment }}
+      DO_SPACES_KEY: ${{ secrets.DO_SPACES_KEY }}
+      DO_SPACES_SECRET: ${{ secrets.DO_SPACES_SECRET }}
+      DO_SPACES_NAME: ${{ inputs.spaces_name }}
+      DO_SPACES_REGION: ${{ inputs.spaces_region }}
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+
+    - name: Install doctl
+      run: |
+        sudo snap install doctl --classic
+
+    - name: Authenticate doctl
+      env:
+        DIGITALOCEAN_ACCESS_TOKEN: ${{ secrets.DO_TOKEN }}
+      run: |
+        doctl auth init --access-token $DIGITALOCEAN_ACCESS_TOKEN
+
+    - name: Create Droplet
+      id: create_droplet
+      env:
+        DIGITALOCEAN_ACCESS_TOKEN: ${{ secrets.DO_TOKEN }}
+      run: |
+        echo "Starting droplet creation..."
+        
+        # Debug: Show current directory and permissions
+        pwd
+        ls -la
+        
+        # Make script executable
+        chmod +x fetch-env.sh
+        
+        # Install s3cmd if needed
+        if ! command -v s3cmd &> /dev/null; then
+          sudo apt-get update
+          sudo apt-get install -y s3cmd
+        fi
+        
+        # Fetch and source deployment config
+        sudo -E ./fetch-env.sh
+        source deployment.env
+        
+        # Check if droplet already exists
+        echo "Checking for existing droplet..."
+        EXISTING_DROPLET_ID=$(doctl compute droplet list --format ID,Name --no-header | grep "my-droplet" | awk '{print $1}')
+        
+        if [ ! -z "$EXISTING_DROPLET_ID" ]; then
+          echo "Found existing droplet with ID: $EXISTING_DROPLET_ID"
+          
+          # Check if IP is already assigned
+          CURRENT_IP=$(doctl compute droplet get $EXISTING_DROPLET_ID --format PublicIPv4 --no-header)
+          if [ "$CURRENT_IP" == "$RESERVED_IP" ]; then
+            echo "Reserved IP is already assigned to the droplet"
+            DROPLET_ID=$EXISTING_DROPLET_ID
+          else
+            echo "Destroying existing droplet..."
+            doctl compute droplet delete $EXISTING_DROPLET_ID --force
+            
+            echo "Creating new droplet..."
+            DROPLET_ID=$(doctl compute droplet create my-droplet \
+              --region blr1 \
+              --image docker-20-04 \
+              --size s-2vcpu-4gb \
+              --ssh-keys ${SSH_KEY_ID} \
+              --enable-monitoring \
+              --format ID \
+              --no-header)
+          fi
+        else
+          # Verify SSH key
+          echo "Checking SSH key..."
+          SSH_KEY_ID=$(doctl compute ssh-key list --format ID --no-header)
+          echo "SSH key verification completed"
+          
+          # Create new droplet
+          echo "Creating new droplet..."
+          DROPLET_ID=$(doctl compute droplet create my-droplet \
+            --region blr1 \
+            --image docker-20-04 \
+            --size s-2vcpu-4gb \
+            --ssh-keys ${SSH_KEY_ID} \
+            --enable-monitoring \
+            --format ID \
+            --no-header)
+        fi
+        
+        echo "Droplet ID: $DROPLET_ID"
+        
+        # Wait for droplet to be active
+        echo "Waiting for droplet to become active..."
+        while [[ $(doctl compute droplet get $DROPLET_ID --format Status --no-header) != "active" ]]; do
+          echo "Still waiting..."
+          sleep 10
+        done
+        
+        # Check current IP assignment
+        echo "Checking current IP assignment..."
+        CURRENT_IP=$(doctl compute floating-ip get $RESERVED_IP --format Droplet --no-header)
+        
+        if [ "$CURRENT_IP" != "$DROPLET_ID" ]; then
+          echo "Assigning reserved IP..."
+          doctl compute floating-ip-action assign $RESERVED_IP $DROPLET_ID
+        else
+          echo "Reserved IP is already assigned to the correct droplet"
+        fi
+        
+        # Set the IP in environment and output
+        echo "DROPLET_IP=$RESERVED_IP" >> $GITHUB_ENV
+        echo "droplet_ip=$RESERVED_IP" >> $GITHUB_OUTPUT
+        
+        echo "Droplet setup completed"
+
+    - name: Wait for Droplet to Become Active
+      run: |
+        sleep 60 # Give the droplet time to initialize 

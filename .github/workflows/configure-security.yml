@@ -1,0 +1,70 @@
+name: Configure Security
+
+on:
+  workflow_call:
+    inputs:
+      droplet_ip:
+        required: true
+        type: string
+    secrets:
+      DO_SSH_PRIVATE_KEY:
+        required: true
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    
+    env:
+      DROPLET_IP: ${{ inputs.droplet_ip }}
+
+    steps:
+    - name: Set up SSH
+      uses: webfactory/ssh-agent@v0.5.4
+      with:
+        ssh-private-key: ${{ secrets.DO_SSH_PRIVATE_KEY }}
+
+    - name: Configure Firewall
+      run: |
+        ssh -o StrictHostKeyChecking=no root@${{ inputs.droplet_ip }} << EOF
+        # Allow HTTP and HTTPS traffic
+        ufw allow 80/tcp
+        ufw allow 443/tcp
+        ufw allow 8000/tcp
+        ufw allow 9000/tcp
+        ufw allow 3000/tcp
+        ufw --force enable
+        
+        # Verify firewall rules
+        ufw status
+        EOF
+
+    - name: Configure SSL
+      run: |
+        ssh -o StrictHostKeyChecking=no root@${{ inputs.droplet_ip }} << EOF
+        cd ~/app
+        source deployment.env
+        
+        # Stop services for SSL setup
+        systemctl stop nginx || true
+        docker compose down
+        
+        # Install certbot if needed
+        if ! command -v certbot &> /dev/null; then
+          apt-get update
+          apt-get remove -y nginx nginx-common || true
+          apt-get install -y certbot
+        fi
+        
+        # Set up SSL certificates
+        certbot certonly --standalone \
+          --preferred-challenges http \
+          -d \$DOMAIN \
+          --non-interactive \
+          --agree-tos \
+          -m admin@ayurvahi.com \
+          --server https://api.buypass.com/acme/directory \
+          --cert-name \$DOMAIN
+        
+        # Start services again
+        docker compose up -d
+        EOF 
