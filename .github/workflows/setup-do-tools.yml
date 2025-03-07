@@ -19,6 +19,10 @@ on:
         required: true
       DO_SPACES_SECRET:
         required: true
+    outputs:
+      droplet_ip:
+        description: "IP address of the provisioned droplet"
+        value: ${{ jobs.setup-tools.outputs.droplet_ip }}
 
 jobs:
   setup-tools:
@@ -69,7 +73,10 @@ jobs:
         
         # Fetch and source deployment config
         sudo -E ./fetch-env.sh
-        source deployment.env
+        source deployment.env || echo "deployment.env not found or failed to source"
+        
+        # Debug: Check if RESERVED_IP is defined
+        echo "Debug: RESERVED_IP value is: ${RESERVED_IP:-not defined}"
         
         # Check if droplet already exists
         echo "Checking for existing droplet..."
@@ -77,31 +84,30 @@ jobs:
         
         if [ ! -z "$EXISTING_DROPLET_ID" ]; then
           echo "Found existing droplet with ID: $EXISTING_DROPLET_ID"
+          DROPLET_ID=$EXISTING_DROPLET_ID
           
-          # Check if IP is already assigned
-          CURRENT_IP=$(doctl compute droplet get $EXISTING_DROPLET_ID --format PublicIPv4 --no-header)
-          if [ "$CURRENT_IP" == "$RESERVED_IP" ]; then
-            echo "Reserved IP is already assigned to the droplet"
-            DROPLET_ID=$EXISTING_DROPLET_ID
-          else
-            echo "Destroying existing droplet..."
-            doctl compute droplet delete $EXISTING_DROPLET_ID --force
-            
-            echo "Creating new droplet..."
-            DROPLET_ID=$(doctl compute droplet create my-droplet \
-              --region blr1 \
-              --image docker-20-04 \
-              --size s-2vcpu-4gb \
-              --ssh-keys ${SSH_KEY_ID} \
-              --enable-monitoring \
-              --format ID \
-              --no-header)
+          # Get the droplet's Public IP
+          DROPLET_PUBLIC_IP=$(doctl compute droplet get $DROPLET_ID --format PublicIPv4 --no-header)
+          echo "Existing droplet public IP: $DROPLET_PUBLIC_IP"
+          
+          # Check if reserved IP is defined and should be used
+          if [ ! -z "$RESERVED_IP" ]; then
+            echo "Reserved IP is defined: $RESERVED_IP"
+            # Check if IP is already assigned
+            CURRENT_IP=$(doctl compute droplet get $EXISTING_DROPLET_ID --format PublicIPv4 --no-header)
+            if [ "$CURRENT_IP" == "$RESERVED_IP" ]; then
+              echo "Reserved IP is already assigned to the droplet"
+            else
+              echo "Assigning reserved IP to existing droplet..."
+              doctl compute floating-ip-action assign $RESERVED_IP $DROPLET_ID
+              DROPLET_PUBLIC_IP=$RESERVED_IP
+            fi
           fi
         else
           # Verify SSH key
           echo "Checking SSH key..."
           SSH_KEY_ID=$(doctl compute ssh-key list --format ID --no-header)
-          echo "SSH key verification completed"
+          echo "SSH key verification completed with ID: $SSH_KEY_ID"
           
           # Create new droplet
           echo "Creating new droplet..."
@@ -113,34 +119,47 @@ jobs:
             --enable-monitoring \
             --format ID \
             --no-header)
+            
+          echo "Droplet ID: $DROPLET_ID"
+          
+          # Wait for droplet to be active
+          echo "Waiting for droplet to become active..."
+          while [[ $(doctl compute droplet get $DROPLET_ID --format Status --no-header) != "active" ]]; do
+            echo "Still waiting..."
+            sleep 10
+          done
+          
+          # Get the droplet's Public IP
+          DROPLET_PUBLIC_IP=$(doctl compute droplet get $DROPLET_ID --format PublicIPv4 --no-header)
+          echo "New droplet public IP: $DROPLET_PUBLIC_IP"
+          
+          # Check if reserved IP is defined and should be used
+          if [ ! -z "$RESERVED_IP" ]; then
+            echo "Reserved IP is defined: $RESERVED_IP"
+            echo "Assigning reserved IP to new droplet..."
+            doctl compute floating-ip-action assign $RESERVED_IP $DROPLET_ID
+            DROPLET_PUBLIC_IP=$RESERVED_IP
+          fi
         fi
         
-        echo "Droplet ID: $DROPLET_ID"
-        
-        # Wait for droplet to be active
-        echo "Waiting for droplet to become active..."
-        while [[ $(doctl compute droplet get $DROPLET_ID --format Status --no-header) != "active" ]]; do
-          echo "Still waiting..."
-          sleep 10
-        done
-        
-        # Check current IP assignment
-        echo "Checking current IP assignment..."
-        CURRENT_IP=$(doctl compute floating-ip get $RESERVED_IP --format Droplet --no-header)
-        
-        if [ "$CURRENT_IP" != "$DROPLET_ID" ]; then
-          echo "Assigning reserved IP..."
-          doctl compute floating-ip-action assign $RESERVED_IP $DROPLET_ID
-        else
-          echo "Reserved IP is already assigned to the correct droplet"
+        # Ensure we have a valid IP to use
+        if [ -z "$DROPLET_PUBLIC_IP" ]; then
+          echo "Error: Could not determine droplet IP address"
+          exit 1
         fi
         
-        # Set the IP in environment and output
-        echo "DROPLET_IP=$RESERVED_IP" >> $GITHUB_ENV
-        echo "droplet_ip=$RESERVED_IP" >> $GITHUB_OUTPUT
+        # Export the IP address for use in other steps
+        echo "Final Droplet IP: $DROPLET_PUBLIC_IP"
+        echo "DROPLET_IP=$DROPLET_PUBLIC_IP" >> $GITHUB_ENV
+        echo "droplet_ip=$DROPLET_PUBLIC_IP" >> $GITHUB_OUTPUT
         
         echo "Droplet setup completed"
 
     - name: Wait for Droplet to Become Active
       run: |
-        sleep 60 # Give the droplet time to initialize 
+        sleep 60 # Give the droplet time to initialize
+        
+    - name: Debug Outputs
+      run: |
+        echo "Debug: Final DROPLET_IP env variable is: $DROPLET_IP"
+        echo "Debug: This value will be passed to other workflows: $(cat $GITHUB_OUTPUT | grep droplet_ip)" 

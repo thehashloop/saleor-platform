@@ -18,6 +18,16 @@ jobs:
       DROPLET_IP: ${{ inputs.droplet_ip }}
 
     steps:
+    - name: Debug Connection Info
+      run: |
+        echo "Debug: Connecting to droplet with IP: ${{ inputs.droplet_ip }}"
+        echo "Debug: DROPLET_IP env variable is: $DROPLET_IP"
+        
+        if [ -z "$DROPLET_IP" ]; then
+          echo "Error: DROPLET_IP is empty. Cannot proceed with security configuration."
+          exit 1
+        fi
+
     - name: Set up SSH
       uses: webfactory/ssh-agent@v0.5.4
       with:
@@ -25,7 +35,7 @@ jobs:
 
     - name: Configure Firewall
       run: |
-        ssh -o StrictHostKeyChecking=no root@${{ inputs.droplet_ip }} << EOF
+        ssh -o StrictHostKeyChecking=no root@$DROPLET_IP << EOF
         # Allow HTTP and HTTPS traffic
         ufw allow 80/tcp
         ufw allow 443/tcp
@@ -40,7 +50,7 @@ jobs:
 
     - name: Configure SSL
       run: |
-        ssh -o StrictHostKeyChecking=no root@${{ inputs.droplet_ip }} << EOF
+        ssh -o StrictHostKeyChecking=no root@$DROPLET_IP << EOF
         cd ~/app
         source deployment.env
         

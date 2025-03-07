@@ -39,18 +39,36 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v3
 
+    - name: Debug Connection Info
+      run: |
+        echo "Debug: Connecting to droplet with IP: ${{ inputs.droplet_ip }}"
+        echo "Debug: DROPLET_IP env variable is: $DROPLET_IP"
+
     - name: Set up SSH
       uses: webfactory/ssh-agent@v0.5.4
       with:
         ssh-private-key: ${{ secrets.DO_SSH_PRIVATE_KEY }}
 
+    - name: Verify Host Connection
+      run: |
+        # Disable strict host key checking for this test
+        if [ -z "$DROPLET_IP" ]; then
+          echo "Error: DROPLET_IP is empty. Cannot proceed with deployment."
+          exit 1
+        fi
+        
+        # Test connection to the host
+        echo "Testing connection to $DROPLET_IP..."
+        ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 root@$DROPLET_IP 'echo Connection successful'
+
     - name: Copy Files to Droplet
       run: |
-        scp -o StrictHostKeyChecking=no -r . root@${{ inputs.droplet_ip }}:~/app
+        echo "Copying files to droplet at IP: $DROPLET_IP"
+        scp -o StrictHostKeyChecking=no -r . root@$DROPLET_IP:~/app
 
     - name: Configure Environment and Start Services
       run: |
-        ssh -o StrictHostKeyChecking=no root@${{ inputs.droplet_ip }} << EOF
+        ssh -o StrictHostKeyChecking=no root@$DROPLET_IP << EOF
         cd ~/app
         
         # Create .env file for Docker Compose

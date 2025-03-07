@@ -35,8 +35,22 @@ jobs:
       DO_SPACES_KEY: ${{ secrets.DO_SPACES_KEY }}
       DO_SPACES_SECRET: ${{ secrets.DO_SPACES_SECRET }}
 
-  deployment:
+  debug-output:
     needs: setup-and-provision
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Droplet IP
+        run: |
+          echo "Debug: Received droplet IP from setup-and-provision job: ${{ needs.setup-and-provision.outputs.droplet_ip }}"
+          if [ -z "${{ needs.setup-and-provision.outputs.droplet_ip }}" ]; then
+            echo "Warning: Droplet IP is empty"
+            exit 1
+          else
+            echo "Droplet IP is valid: ${{ needs.setup-and-provision.outputs.droplet_ip }}"
+          fi
+
+  deployment:
+    needs: [setup-and-provision, debug-output]
     uses: ./.github/workflows/deploy-to-droplet.yml
     with:
       droplet_ip: ${{ needs.setup-and-provision.outputs.droplet_ip }}
