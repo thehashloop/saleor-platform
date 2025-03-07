@@ -235,6 +235,19 @@ jobs:
         # Assign reserved IP
         echo "Assigning reserved IP $RESERVED_IP to droplet $DROPLET_ID..."
         doctl compute floating-ip-action assign $RESERVED_IP $DROPLET_ID
+
+        # Wait for IP assignment to complete
+        echo "Waiting for IP assignment to complete..."
+        sleep 30
+        
+        # Verify assignment
+        ASSIGNED_TO=$(doctl compute floating-ip get $RESERVED_IP --format DropletID --no-header | xargs)
+        if [[ "$ASSIGNED_TO" == "$DROPLET_ID" ]]; then
+          echo "✅ IP successfully assigned to droplet"
+        else
+          echo "⚠️ IP assignment verification failed. Assignment status: $ASSIGNED_TO"
+        fi
+        
         echo "DROPLET_IP=$RESERVED_IP" >> $GITHUB_ENV
 
     - name: Set up SSH
@@ -244,42 +257,79 @@ jobs:
 
     - name: Wait for SSH service
       run: |
-        echo "Waiting for SSH service to start (120 seconds)..."
-        sleep 120
+        echo "Waiting for SSH service to start (180 seconds)..."
+        sleep 180
         echo "Proceeding with SSH verification..."
 
+    - name: Network Diagnostics
+      run: |
+        echo "Running network diagnostics for ${{ env.RESERVED_IP }}..."
+        
+        # Check if IP is pingable
+        echo "Testing ping to ${{ env.RESERVED_IP }}..."
+        ping -c 4 ${{ env.RESERVED_IP }} || echo "Ping failed but continuing..."
+        
+        # Check if port 22 is reachable
+        echo "Testing TCP connection to port 22..."
+        nc -zv -w 5 ${{ env.RESERVED_IP }} 22 || echo "Port 22 not reachable yet but continuing..."
+        
+        # Get droplet details
+        echo "Retrieving droplet details..."
+        doctl compute droplet get ${{ env.DROPLET_ID }} --format "ID,Name,PublicIPv4,Status,Features"
+
     - name: Verify Deployment
+      continue-on-error: true  # Don't fail workflow if SSH can't connect
       run: |
         echo "Verifying droplet connectivity..."
-        MAX_RETRIES=10
+        MAX_RETRIES=15
         RETRY_COUNT=0
         
         # Add the server to known hosts to avoid prompts
         mkdir -p ~/.ssh
-        ssh-keyscan -H $RESERVED_IP >> ~/.ssh/known_hosts 2>/dev/null || true
+        ssh-keyscan -H ${{ env.RESERVED_IP }} >> ~/.ssh/known_hosts 2>/dev/null || true
         
         # Retry SSH connection until successful or max retries reached
-        echo "Testing SSH connectivity to $RESERVED_IP..."
+        echo "Testing SSH connectivity to ${{ env.RESERVED_IP }}..."
         while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-          if timeout 10 ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=5 root@$RESERVED_IP echo "SSH connection successful"; then
+          if timeout 30 ssh -v -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=15 root@${{ env.RESERVED_IP }} echo "SSH connection successful"; then
             echo "✅ SSH connection established successfully!"
+            echo "SSH_SUCCESS=true" >> $GITHUB_ENV
             exit 0
           else
             RETRY_COUNT=$((RETRY_COUNT+1))
             echo "❌ SSH connection failed. Retrying ($RETRY_COUNT/$MAX_RETRIES)..."
-            sleep 10
+            sleep 20
           fi
         done
         
         echo "⚠️ WARNING: Could not establish SSH connection after $MAX_RETRIES attempts."
-        echo "The droplet may still be initializing. Check the status manually."
-        # Don't fail the workflow, as the droplet might still be setting up
-        # The IP address information will still be available in the outputs
+        echo "The droplet has been created and the IP assigned, but SSH connection could not be verified."
+        echo "SSH_SUCCESS=false" >> $GITHUB_ENV
+        
+        # Print SSH debug info
+        echo "SSH debugging information:"
+        ssh -v -o BatchMode=yes -o ConnectTimeout=5 root@${{ env.RESERVED_IP }} 2>&1 | head -n 20
 
     - name: Output Deployment Info
       run: |
+        echo "============= DEPLOYMENT SUMMARY ============="
         echo "Droplet Name: $DROPLET_NAME"
-        echo "IP Address: $RESERVED_IP"
-        echo "ID: $DROPLET_ID"
+        echo "IP Address: ${{ env.RESERVED_IP }}"
+        echo "ID: ${{ env.DROPLET_ID }}"
         echo "Region: $REGION"
         echo "Size: $SIZE"
+        echo "SSH Connection: ${SSH_SUCCESS:-false}"
+        
+        # If SSH failed, provide debugging guidance
+        if [[ "${SSH_SUCCESS:-false}" != "true" ]]; then
+          echo ""
+          echo "============= TROUBLESHOOTING TIPS ============="
+          echo "1. The droplet was created successfully but SSH connection could not be established."
+          echo "2. This is sometimes normal for new droplets as the SSH service may take longer to start."
+          echo "3. You can try connecting manually: ssh root@${{ env.RESERVED_IP }}"
+          echo "4. Check if the correct SSH key ($SSH_KEY_NAME) was used during creation."
+          echo "5. Verify the droplet's status in the DigitalOcean console."
+          echo "6. Consider checking if there are any active firewalls blocking SSH access."
+          echo ""
+          echo "Note: Despite the SSH connection failure, the workflow has completed the droplet provisioning."
+        fi
